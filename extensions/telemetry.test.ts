@@ -511,6 +511,96 @@
 
   const subagentResult = (results: unknown[], content = "") => ({ toolName: "subagent", toolCallId: "sa", input: {}, content: [{ type: "text", text: content }], isError: false, details: { results } });
 
+  async function boundInBrainstorm() {
+    const h = harness();
+    await h.phaseResult("start", P({ brainstorm: "in_progress" }));
+    await h.writeSpec("doc/specs/a.md");
+    return h;
+  }
+  const memberBatch = (isError = false) => ({ ...subagentResult([
+    { agent: "spec-council-member", exitCode: 0, model: "p/alpha:xhigh", savedOutputPath: "/tmp/c/member-0-p-alpha.md", usage: usage(1) },
+    { agent: "spec-council-member", exitCode: 1, model: "p/beta:high", usage: usage(1) },
+    { agent: "spec-council-member", exitCode: 0, model: "p/beta:high", savedOutputPath: "/tmp/c/retry/member-1-p-beta-high.md", usage: usage(1) },
+  ]), isError });
+  const CHAIR_TEXT = "consensus: needs-work\nclusters:\n- [major] a - raised-by: [p-alpha] - x\n- [minor] b - raised-by: [p-alpha, p-beta-high] - x\nresolved:\n";
+  const chairResult = (text = CHAIR_TEXT, exitCode = 0) => ({ ...subagentResult([{ agent: "spec-council-synthesizer", exitCode, model: "p/chair:medium", usage: usage(1) }], text), isError: exitCode !== 0 });
+  const AUDIT_TEXT = "Applied: [major] a - raised-by: [p-alpha] -> edit\nDeferred: none\nRejected: [minor] b - raised-by: [p-alpha, p-beta-high] -> reason";
+  const assistant = (text: string) => ({ type: "message_end", message: { role: "assistant", usage: usage(1), content: [{ type: "text", text }] } });
+  const counts = (major = 0, minor = 0) => ({ blocker: 0, major, minor });
+  const EXPECTED_COUNCIL = {
+    chair: { model: "p/chair:medium", dispatches: 1, clusters: 2, members_reported: 2 },
+    members: {
+      "p/alpha:xhigh": { dispatches: 1, total: counts(1, 1), unique: counts(1), applied: counts(1), unique_applied: counts(1), deferred: counts(), rejected: counts(0, 1) },
+      "p/beta:high": { dispatches: 2, total: counts(0, 1), unique: counts(), applied: counts(), unique_applied: counts(), deferred: counts(), rejected: counts(0, 1) },
+    },
+  };
+
+  test("council captures failed member batch, chair, audit and persists on later flush", async () => {
+    const h = await boundInBrainstorm();
+    await h.emit("tool_result", memberBatch(true));
+    await h.emit("tool_result", chairResult());
+    assert.equal(h.readRecord().derived.council, undefined);
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    assert.deepEqual(h.readRecord().derived.council, EXPECTED_COUNCIL);
+    await h.phaseResult("complete", P({ brainstorm: "complete" }));
+    assert.deepEqual(h.readRecord().derived.council, EXPECTED_COUNCIL);
+    assert.equal(h.readRecord().derived.personas["spec-council-member"], undefined);
+  });
+  test("council defaults missing chair model and survives unrelated result before audit", async () => {
+    const h = await boundInBrainstorm();
+    await h.emit("tool_result", memberBatch());
+    await h.emit("tool_result", subagentResult([{ agent: "spec-council-synthesizer", exitCode: 0, usage: usage(1) }], CHAIR_TEXT));
+    await h.emit("tool_result", subagentResult([{ agent: "spec-summarizer", exitCode: 0, model: "p/s", usage: usage(1) }]));
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    assert.deepEqual(h.readRecord().derived.council, { ...EXPECTED_COUNCIL, chair: { ...EXPECTED_COUNCIL.chair, model: "unknown" } });
+  });
+  test("council ignores plan phase", async () => {
+    const h = await boundInPlan();
+    await h.emit("tool_result", memberBatch());
+    await h.emit("tool_result", chairResult());
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    assert.equal(h.readRecord().derived.council, undefined);
+  });
+  test("council counts failed chair retries and retains last usable clusters", async () => {
+    const h = await boundInBrainstorm();
+    await h.emit("tool_result", memberBatch());
+    await h.emit("tool_result", chairResult("Failed", 1));
+    await h.emit("tool_result", chairResult());
+    await h.emit("tool_result", chairResult("no consensus here", 1));
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    assert.deepEqual(h.readRecord().derived.council!.chair, { ...EXPECTED_COUNCIL.chair, dispatches: 3 });
+  });
+  test("council retains pending on incomplete audit and ignores audit before chair", async () => {
+    const h = await boundInBrainstorm();
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    await h.emit("tool_result", memberBatch());
+    await h.emit("tool_result", chairResult());
+    await h.emit("message_end", assistant("Applied: [major] a - raised-by: [p-alpha] -> edit\nDeferred: none\nRejected: none"));
+    assert.equal(h.readRecord().derived.council, undefined);
+    await h.emit("message_end", assistant("Applied: a -> edit\nDeferred: none\nRejected: none"));
+    assert.equal(h.readRecord().derived.council, undefined);
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    assert.deepEqual(h.readRecord().derived.council, EXPECTED_COUNCIL);
+  });
+  test("council reset clears pending and new member batch supersedes held chair", async () => {
+    const h = await boundInBrainstorm();
+    await h.emit("tool_result", memberBatch());
+    await h.emit("tool_result", chairResult());
+    await h.phaseResult("reset", P());
+    await h.phaseResult("start", P({ brainstorm: "in_progress" }));
+    await h.writeSpec("doc/specs/a.md");
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    assert.equal(h.readRecord().derived.council, undefined);
+    await h.emit("tool_result", memberBatch());
+    await h.emit("tool_result", chairResult());
+    await h.emit("tool_result", memberBatch());
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    assert.equal(h.readRecord().derived.council, undefined);
+    await h.emit("tool_result", chairResult());
+    await h.emit("message_end", assistant(AUDIT_TEXT));
+    assert.deepEqual(h.readRecord().derived.council, EXPECTED_COUNCIL);
+  });
+
   test("subagent results: dispatch events, persona tokens, spec_rounds, reviews, conformance_loops; async results: [] contribute nothing", async () => {
     const h = await boundInPlan();
     await h.emit("tool_result", subagentResult([

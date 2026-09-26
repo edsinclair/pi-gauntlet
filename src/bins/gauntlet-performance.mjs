@@ -9,21 +9,17 @@ import process from "node:process";
 import { parse as parseYaml } from "yaml";
 import { mergeGauntlet, resolveTelemetry } from "../../extensions/lib/gauntlet-settings.ts";
 
-const PHASES = ["brainstorm", "plan", "implement", "verify", "ship"];
-const TOKEN_KEYS = ["input", "output", "cache_read", "cache_write"];
-const RUN_HEADER = ["run_id", "repo", "spec", "version", "status", "wall", "b/p/i/v/s min", "tokens", "cost", "models", "disp", "grants", "reopens", "loops", "findings", "council"];
-const VERSION_HEADER = ["version", "n", "shipped", "truncated", "wall p50/max", "tokens p50/max", "cost p50/max", "disp p50", "grants p50/max", "reopens p50/max", "loops p50/max", "findings p50 b/M/m", "models"];
+import { PHASES, TOKEN_KEYS, cmpSemver, num, obj, semver, str, sumOrNull } from "./performance/shared.mjs";
+import * as runs from "./performance/runs.mjs";
+import * as versions from "./performance/versions.mjs";
+import * as council from "./performance/council.mjs";
+
+const SECTIONS = [runs, versions, council];
 
 const usage = () => {
   process.stderr.write("usage: gauntlet-performance [--dir <repo root or telemetry dir>]... [--since <version>] [--json]\n");
   process.exit(1);
 };
-
-const semver = (s) => {
-  const m = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(typeof s === "string" ? s.trim() : "");
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
-};
-const cmpSemver = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
 function parseArgs(argv) {
   const opts = { dirs: [], since: undefined, json: false };
@@ -85,14 +81,6 @@ function* yamlFiles(dir) {
     else if (e.isFile() && e.name.endsWith(".yaml")) yield p;
   }
 }
-
-const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-const str = (v) => (typeof v === "string" ? v : null);
-const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : null);
-const sumOrNull = (vals) => {
-  const xs = vals.filter((v) => v !== null);
-  return xs.length ? xs.reduce((a, b) => a + b, 0) : null;
-};
 
 function loadRecord(file, label) {
   let doc;
@@ -159,77 +147,9 @@ function loadRecord(file, label) {
       ship_option: str(gates.ship_option),
       tests: str(obj(derived.tests)?.result),
     },
+    council: derived.council ?? null,
   };
 }
-
-const p50 = (xs) => {
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-};
-const stat = (rows, pick) => {
-  const xs = rows.map(pick).filter((v) => v !== null && v !== undefined);
-  return xs.length ? { p50: p50(xs), max: Math.max(...xs) } : { p50: null, max: null };
-};
-const versionOrder = (a, b) => {
-  const x = semver(a), y = semver(b);
-  return x && y ? cmpSemver(x, y) : x ? -1 : y ? 1 : 0;
-};
-
-function aggregate(rows) {
-  const groups = new Map();
-  for (const r of rows) {
-    if (!groups.has(r.version)) groups.set(r.version, []);
-    groups.get(r.version).push(r);
-  }
-  return [...groups.entries()].sort(([a], [b]) => versionOrder(a, b)).map(([version, all]) => {
-    const shipped = all.filter((r) => r.status === "shipped" && !r.truncated);
-    const models = {};
-    for (const r of shipped) for (const m of r.models) models[m] = (models[m] ?? 0) + 1;
-    return {
-      version,
-      n: all.length,
-      shipped: shipped.length,
-      truncated: all.filter((r) => r.truncated).length,
-      wall_s: stat(shipped, (r) => r.wall_s),
-      tokens: stat(shipped, (r) => r.tokens),
-      cost: stat(shipped, (r) => r.cost),
-      dispatches: { p50: stat(shipped, (r) => r.dispatches).p50 },
-      grants: stat(shipped, (r) => r.grants),
-      reopens: stat(shipped, (r) => r.reopens),
-      loops: stat(shipped, (r) => r.loops),
-      findings: {
-        blocker: { p50: stat(shipped, (r) => r.findings?.blocker ?? null).p50 },
-        major: { p50: stat(shipped, (r) => r.findings?.major ?? null).p50 },
-        minor: { p50: stat(shipped, (r) => r.findings?.minor ?? null).p50 },
-      },
-      models,
-    };
-  });
-}
-
-const dash = (v) => (v === null || v === undefined ? "-" : String(v));
-const fmtMin = (s) => (s === null ? "-" : `${Math.round(s / 60)}m`);
-const fmtCount = (n) => (n === null ? "-" : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
-const fmtCost = (c) => (c === null ? "-" : c.toFixed(2));
-const pair = (s, f) => `${f(s.p50)}/${f(s.max)}`;
-const findingsCell = (f) => (f === null ? "-" : `${dash(f.blocker)}/${dash(f.major)}/${dash(f.minor)}`);
-const table = (header, rows) => {
-  const w = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
-  return [header, ...rows].map((r) => r.map((c, i) => c.padEnd(w[i])).join("  ").trimEnd()).join("\n");
-};
-const runRow = (r) => [
-  r.run_id.slice(0, 8), r.repo, r.spec, r.version, `${dash(r.status)}${r.truncated ? "*" : ""}`, fmtMin(r.wall_s),
-  PHASES.map((p) => (r.phase_min[p] === null ? "-" : String(Math.round(r.phase_min[p])))).join("/"),
-  fmtCount(r.tokens), fmtCost(r.cost), r.models.join(",") || "-", dash(r.dispatches), dash(r.grants), dash(r.reopens), dash(r.loops),
-  findingsCell(r.findings), dash(r.council),
-];
-const versionRow = (g) => [
-  g.version, String(g.n), String(g.shipped), String(g.truncated), pair(g.wall_s, fmtMin), pair(g.tokens, fmtCount), pair(g.cost, fmtCost),
-  dash(g.dispatches.p50), pair(g.grants, dash), pair(g.reopens, dash), pair(g.loops, dash),
-  `${dash(g.findings.blocker.p50)}/${dash(g.findings.major.p50)}/${dash(g.findings.minor.p50)}`,
-  Object.entries(g.models).map(([m, n]) => `${m}:${n}`).join(",") || "-",
-];
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
@@ -246,7 +166,7 @@ function main() {
   const since = opts.since === undefined ? undefined : semver(opts.since);
   const seen = new Set();
   const corpus = {};
-  const rows = [];
+  const entries = [];
   for (const c of corpora) {
     corpus[c.label] = corpus[c.label] ?? 0;
     for (const file of yamlFiles(c.dir)) {
@@ -257,27 +177,26 @@ function main() {
       const v = semver(res.row.version);
       if (since && (!v || cmpSemver(v, since) < 0)) continue;
       corpus[c.label]++;
-      rows.push(res.row);
+      entries.push(res);
     }
   }
-  rows.sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? "") || a.run_id.localeCompare(b.run_id));
-  const byVersion = rows.length ? aggregate(rows) : [];
+  entries.sort((a, b) => (a.row.created_at ?? "").localeCompare(b.row.created_at ?? "") || a.row.run_id.localeCompare(b.row.run_id));
+  const aggregates = SECTIONS.map((s) => [s, s.aggregate(entries)]);
   if (opts.json) {
-    console.log(JSON.stringify({ corpus, since: opts.since ?? null, runs: rows, by_version: byVersion, skipped }, null, 2));
+    const out = { corpus, since: opts.since ?? null };
+    for (const [s, agg] of aggregates) out[s.key] = agg;
+    out.skipped = skipped;
+    console.log(JSON.stringify(out, null, 2));
     return;
   }
   console.log(`corpus: ${Object.entries(corpus).map(([k, v]) => `${k}=${v}`).join(", ")}${opts.since === undefined ? "" : `   since: ${opts.since}`}`);
-  if (rows.length === 0) {
+  if (entries.length === 0) {
     console.log(`no records found in ${corpora.map((c) => c.dir).join(", ") || process.cwd()}`);
   } else {
-    console.log(`runs (${rows.length})`);
-    console.log(table(RUN_HEADER, rows.map(runRow)));
-    console.log("");
-    console.log("by version");
-    console.log(table(VERSION_HEADER, byVersion.map(versionRow)));
+    console.log(aggregates.map(([s, agg]) => s.renderText(agg)).join("\n\n"));
   }
-  if (rows.length && skipped.length) console.log("");
-  if (rows.length) for (const s of skipped) console.log(`skipped: ${s.file}: ${s.reason}`);
+  if (entries.length && skipped.length) console.log("");
+  if (entries.length) for (const s of skipped) console.log(`skipped: ${s.file}: ${s.reason}`);
 }
 
 main();

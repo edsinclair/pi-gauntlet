@@ -168,7 +168,7 @@ function derive(rec, now) {
   }
   for (const k of Object.keys(acc.phases)) phases[k] = compact({ ...phases[k] ?? {}, ...acc.phases[k] });
   const live = liveShipEvent(rec.events);
-  return compact({ duration_s: seconds(rec.created_at, rec.shipped_at ?? rec.abandoned_at ?? now), phases, personas: acc.personas, reviews: Object.keys(acc.reviews).length ? acc.reviews : void 0, conformance_loops: acc.conformance_loops, conformance_open_gaps: acc.conformance_open_gaps, gates: compact({ ...acc.gates, ship_option: live?.option }), plan: rec.derived.plan, tests: rec.derived.tests, amendments: acc.amendments, spec_edits_after_ship: acc.spec_edits_after_ship, diff: rec.derived.diff, modified_files: rec.derived.modified_files, spec_writes: acc.spec_writes, events_dropped: acc.events_dropped });
+  return compact({ duration_s: seconds(rec.created_at, rec.shipped_at ?? rec.abandoned_at ?? now), phases, personas: acc.personas, reviews: Object.keys(acc.reviews).length ? acc.reviews : void 0, conformance_loops: acc.conformance_loops, conformance_open_gaps: acc.conformance_open_gaps, gates: compact({ ...acc.gates, ship_option: live?.option }), plan: rec.derived.plan, tests: rec.derived.tests, amendments: acc.amendments, spec_edits_after_ship: acc.spec_edits_after_ship, diff: rec.derived.diff, modified_files: rec.derived.modified_files, council: rec.derived.council, spec_writes: acc.spec_writes, events_dropped: acc.events_dropped });
 }
 var stripUndefined = (v) => {
   if (Array.isArray(v)) return v.map(stripUndefined);
@@ -202,7 +202,11 @@ function serializeRecord(rec) {
   const body = stripUndefined({ ...head, derived, accumulators });
   const doc = new Document(body);
   const derivedNode = doc.get("derived", true);
-  if (isMap(derivedNode)) flowLeafChildren(derivedNode, /* @__PURE__ */ new Set(["modified_files"]));
+  if (isMap(derivedNode)) {
+    flowLeafChildren(derivedNode, /* @__PURE__ */ new Set(["modified_files", "council"]));
+    const council = derivedNode.get("council", true);
+    if (isMap(council)) flowLeafChildren(council);
+  }
   const accumulatorNode = doc.get("accumulators", true);
   if (isMap(accumulatorNode)) {
     for (const session of accumulatorNode.items) if (isMap(session.value)) flowLeafChildren(session.value);

@@ -391,6 +391,7 @@ try {
       R("extensions/lib/telemetry-paths.test.ts"),
       R("extensions/lib/telemetry-record.test.ts"),
       R("extensions/lib/telemetry-collect.test.ts"),
+      R("extensions/lib/telemetry-council.test.ts"),
       R("extensions/lib/telemetry-ship.test.ts"),
       R("extensions/telemetry.test.ts"),
       R("bin/gauntlet-spec-index.test.mjs"),

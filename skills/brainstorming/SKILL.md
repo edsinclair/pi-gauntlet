@@ -238,10 +238,10 @@ Paste the summary verbatim, unedited in the template below; use adjacent lines f
 Spec written and committed to <project>/doc/specs/<filename>.md (worktree: <path>).
 
 Coverage: <N> of <M> members reported; <slug>: <reason> (line present only when coverage was partial)
-Applied: <cluster -> edit>, ...
-Deferred: <cluster -> where it belongs>, ...
-Rejected: <cluster -> one-line reason>, ...
-(omit the audit lines above when the worker path ran, not the council)
+Applied: [<severity>] <cluster> — raised-by: [<slugs>] -> <edit>
+Deferred: [<severity>] <cluster> — raised-by: [<slugs>] -> <where it belongs>
+Rejected: [<severity>] <cluster> — raised-by: [<slugs>] -> <one-line reason>
+(one line per item, exactly as returned by roasting-the-spec - `Applied: none` / `Deferred: none` / `Rejected: none` when a list is empty; omit the audit lines when the worker path ran, not the council)
 
 <unresolved ambiguities; every gap-footer entry from the summary>
 

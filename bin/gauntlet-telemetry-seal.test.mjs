@@ -100,6 +100,16 @@ test("seals an untracked in_progress record: stamp, ship event, diff, re-derived
   assert.equal(porcelain(root), "");
 });
 
+test("seal preserves derived.council through the shipped stamp", (t) => {
+  const council = { chair: { model: "p/chair:medium", dispatches: 1, clusters: 0, members_reported: 0 }, members: {} };
+  const root = repo({ record: RECORD.replace("  spec_writes: {}", `  council: ${JSON.stringify(council)}\n  spec_writes: {}`) }); cleanup(t, root);
+  const r = run(root, ["--spec", SPEC]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(record(root).status, "shipped");
+  assert.deepEqual(record(root).derived.council, council);
+  assert.deepEqual(parseYaml(out(root, ["show", `HEAD:${REC}`])).derived.council, council);
+});
+
 test("--spec accepts an absolute path within the checkout", (t) => {
   const root = repo(); cleanup(t, root);
   const r = run(root, ["--spec", join(realpathSync(root), SPEC)]);

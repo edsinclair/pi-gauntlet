@@ -1,6 +1,7 @@
 // Telemetry record model (#33): phases, events, accumulators, derive, YAML.
 import { Document, isCollection, isMap, isSeq, parse as parseYaml, stringify as stringifyYaml, type YAMLMap } from "yaml";
 import type { BucketStat, ShipOption } from "./telemetry-paths.ts";
+import type { CouncilBlock } from "./telemetry-council.ts";
 
 export const PHASES = ["brainstorm", "plan", "implement", "verify", "ship"] as const;
 export type Phase = (typeof PHASES)[number];
@@ -91,7 +92,7 @@ export interface Derived {
   duration_s: number; phases: Partial<Record<PhaseKey, PhaseAcc & { started_at?: string; completed_at?: string; duration_s?: number; model?: string; thinking?: string }>>;
   personas: Record<string, PersonaAcc>; reviews?: Record<string, ReviewAcc>; conformance_loops: number; conformance_open_gaps?: number; gates: Gates & { ship_option?: string };
   plan?: { tasks: number; complete: number; failed: number; skipped: number }; tests?: { command: string; result: "pass" | "fail" }; amendments: number;
-  spec_edits_after_ship: number; diff?: DiffSummary; modified_files?: string[]; spec_writes: Accumulators["spec_writes"]; events_dropped: number;
+  spec_edits_after_ship: number; diff?: DiffSummary; modified_files?: string[]; council?: CouncilBlock; spec_writes: Accumulators["spec_writes"]; events_dropped: number;
 }
 export type RecordStatus = "in_progress" | "shipped" | "abandoned";
 export interface TelemetryRecord {
@@ -121,7 +122,7 @@ export function derive(rec: TelemetryRecord, now: string): Derived {
   }
   for (const k of Object.keys(acc.phases) as PhaseKey[]) phases[k] = compact({ ...(phases[k] ?? {}), ...acc.phases[k] });
   const live = liveShipEvent(rec.events);
-  return compact({ duration_s: seconds(rec.created_at, rec.shipped_at ?? rec.abandoned_at ?? now), phases, personas: acc.personas, reviews: Object.keys(acc.reviews).length ? acc.reviews : undefined, conformance_loops: acc.conformance_loops, conformance_open_gaps: acc.conformance_open_gaps, gates: compact({ ...acc.gates, ship_option: live?.option }), plan: rec.derived.plan, tests: rec.derived.tests, amendments: acc.amendments, spec_edits_after_ship: acc.spec_edits_after_ship, diff: rec.derived.diff, modified_files: rec.derived.modified_files, spec_writes: acc.spec_writes, events_dropped: acc.events_dropped }) as Derived;
+  return compact({ duration_s: seconds(rec.created_at, rec.shipped_at ?? rec.abandoned_at ?? now), phases, personas: acc.personas, reviews: Object.keys(acc.reviews).length ? acc.reviews : undefined, conformance_loops: acc.conformance_loops, conformance_open_gaps: acc.conformance_open_gaps, gates: compact({ ...acc.gates, ship_option: live?.option }), plan: rec.derived.plan, tests: rec.derived.tests, amendments: acc.amendments, spec_edits_after_ship: acc.spec_edits_after_ship, diff: rec.derived.diff, modified_files: rec.derived.modified_files, council: rec.derived.council, spec_writes: acc.spec_writes, events_dropped: acc.events_dropped }) as Derived;
 }
 
 const stripUndefined = (v: unknown): unknown => {
@@ -156,7 +157,11 @@ export function serializeRecord(rec: TelemetryRecord): string {
   const body = stripUndefined({ ...head, derived, accumulators }) as Record<string, unknown>;
   const doc = new Document(body);
   const derivedNode = doc.get("derived", true);
-  if (isMap(derivedNode)) flowLeafChildren(derivedNode, new Set(["modified_files"]));
+  if (isMap(derivedNode)) {
+    flowLeafChildren(derivedNode, new Set(["modified_files", "council"]));
+    const council = derivedNode.get("council", true);
+    if (isMap(council)) flowLeafChildren(council);
+  }
   const accumulatorNode = doc.get("accumulators", true);
   if (isMap(accumulatorNode)) {
     for (const session of accumulatorNode.items) if (isMap(session.value)) flowLeafChildren(session.value);

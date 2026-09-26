@@ -126,7 +126,7 @@ For each cluster in the chair's report, decide one of:
 
 Also inline any `external-ref:` cluster you have context for (e.g. a ticket fetched during brainstorming) as part of the apply-set — this is your call, same as any other cluster.
 
-An `over-spec:` cluster decided **apply** is executed as deletion or shrink of the quoted clause **and** any acceptance-criteria or testing-approach line that exists only for it. Its audit line reads `Applied: over-spec: <clause> -> cut (was adds: M files / N tests / K ACs)` or `Applied: over-spec: <clause> -> shrunk to <replacement> (was adds: ...)`, so the gate shows what was removed. `defer`/`reject` are unchanged.
+An `over-spec:` cluster decided **apply** is executed as deletion or shrink of the quoted clause **and** any acceptance-criteria or testing-approach line that exists only for it. Its audit line reads `Applied: [<severity>] over-spec: <clause> — raised-by: [<slugs>] -> cut (was adds: M files / N tests / K ACs)` or `Applied: [<severity>] over-spec: <clause> — raised-by: [<slugs>] -> shrunk to <replacement> (was adds: ...)`, so the gate shows what was removed. `defer`/`reject` are unchanged.
 
 You are the advocate — decide on scope grounds — and, unlike a dispatched subagent, also the executor: you hold `edit`/`write` tools directly, so apply the edit yourself instead of proposing it for someone else to make. Do this **before** returning to brainstorming.
 
@@ -135,9 +135,9 @@ You are the advocate — decide on scope grounds — and, unlike a dispatched su
 Return a structured audit, gate-only (not a committed spec section) — a coverage line plus three labelled lists:
 
 - `Coverage:` — `N of M members reported; <slug>: <reason>` — present only when member coverage was partial; omitted at full coverage.
-- `Applied:` — one of `Applied: <cluster> -> <edit> (grounded: <member probe>)`, `Applied: <cluster> -> <edit> (probed: <check> - <result>)` for a confirmed hypothesis, `Applied: <cluster> -> open question (<not found | inconclusive: <check> | contradicted: <result>>)`. The probe rides on the audit line because member files are removed in section 5.
-- `Deferred:` — cluster -> where it belongs.
-- `Rejected:` — cluster -> one-line reason.
+- `Applied:` — one line per applied cluster: `Applied: [<severity>] <cluster> — raised-by: [<slugs>] -> <edit> (grounded: <member probe>)`, `... -> <edit> (probed: <check> - <result>)` for a confirmed hypothesis, or `... -> open question (<not found | inconclusive: <check> | contradicted: <result>>)`. Copy `[<severity>]` and `raised-by: [...]` verbatim from the cluster line - telemetry joins on them. No applied cluster -> the single line `Applied: none`. The probe rides on the audit line because member files are removed in section 5.
+- `Deferred:` — one line per deferred cluster, same `[<severity>] <cluster> — raised-by: [<slugs>]` prefix, then `-> <where it belongs>`. None -> `Deferred: none`.
+- `Rejected:` — one line per rejected cluster, same prefix, then `-> <one-line reason>`. None -> `Rejected: none`.
 
 Hand this audit to brainstorming along with the now-final spec. brainstorming writes it into the **spec commit message body** (git-native, readable pre-squash) so it survives for finish-time revert visibility, then shows it to the user alongside the final spec at its one review gate. The user can revert any applied edit there — that gate, not this skill, is where ratification happens.
 

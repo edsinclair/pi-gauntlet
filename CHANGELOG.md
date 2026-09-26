@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Council telemetry records chair activity and per-member severity/disposition counts in `derived.council`; `gauntlet-performance` groups council results by roster, reports chair summaries and contribution flags after five runs, and exposes the aggregates in JSON. The performance skill includes a council assessment in its reply.
+
+### Changed
+
+- `roasting-the-spec` audit lines and brainstorming's gate template carry `[<severity>]` and `raised-by: [...]` on every `Applied:`/`Deferred:`/`Rejected:` item, one item per line, `none` for an empty list. `gauntlet-performance` is split into section modules under `src/bins/performance/`; existing `runs` and `by version` output is unchanged.
+
 ## v5.20.0 - 2026-09-26
 
 ### Changed

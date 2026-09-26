@@ -348,3 +348,103 @@ test("usage error exits 1", (t) => {
   assert.equal(invoke(root, ["--since", "abc"]).status, 1);
   assert.equal(invoke(root, ["--since", "5.09.1"]).status, 1);
 });
+
+const sev = (b, M, m) => `{ blocker: ${b}, major: ${M}, minor: ${m} }`;
+const member = (dispatches, total, unique, applied, uniqApplied, deferred, rejected) =>
+  `{ dispatches: ${dispatches}, total: ${total}, unique: ${unique}, applied: ${applied}, unique_applied: ${uniqApplied}, deferred: ${deferred}, rejected: ${rejected} }`;
+const ALPHA = member(1, sev(1, 3, 1), sev(0, 1, 1), sev(1, 3, 0), sev(0, 1, 0), sev(0, 0, 0), sev(0, 0, 1));
+const BETA = member(1, sev(0, 2, 2), sev(0, 1, 0), sev(0, 1, 1), sev(0, 1, 0), sev(0, 1, 0), sev(0, 0, 1));
+const GAMMA = member(2, sev(0, 1, 4), sev(0, 0, 3), sev(0, 0, 1), sev(0, 0, 1), sev(0, 0, 0), sev(0, 1, 3));
+const councilRecord = (id, createdAt, version, chair, chairDispatches, members) => `schema: 1
+spec: doc/specs/c-${id}.md
+run_id: ${id}-0000-0000-0000-000000000000
+status: shipped
+created_at: ${createdAt}
+shipped_at: ${createdAt}
+versions: { pi-gauntlet: ${version} }
+derived:
+  duration_s: 60
+  phases:
+    ship: ${phase("model: m/alpha")}
+  personas: {}
+  conformance_loops: 0
+  gates: { spec_rounds: 1, plan_rounds: 1, fix_round_grants: 0, task_reopens: 0 }
+  council:
+    chair: { model: ${chair}, dispatches: ${chairDispatches}, clusters: 6, members_reported: 3 }
+    members:
+${Object.entries(members).map(([k, v]) => `      ${k}: ${v}`).join("\n")}
+  amendments: 0
+  spec_edits_after_ship: 0
+  spec_writes: {}
+  events_dropped: 0
+accumulators: {}
+events: []
+`;
+const ZERO = member(1, ...Array(6).fill(sev(0, 0, 0)));
+const BIG = { "p/alpha:xhigh": ALPHA, "p/beta:high": BETA, "p/gamma:high": GAMMA, "p/zero:high": ZERO };
+const SMALL = { "p/alpha:xhigh": ALPHA, "p/delta:high": BETA };
+const councilCorpus = (root) => {
+  for (let i = 0; i < 6; i++) write(root, `${TDIR}/big-${i}.yaml`, councilRecord(`c000000${i}`, `2026-09-1${i}T00:00:00Z`, "5.20.0", i < 4 ? "p/chair:medium" : "p/other:high", i === 2 ? 2 : 1, BIG));
+  for (let i = 0; i < 2; i++) write(root, `${TDIR}/small-${i}.yaml`, councilRecord(`d000000${i}`, `2026-09-2${i}T00:00:00Z`, "5.21.0", "p/chair:medium", 1, SMALL));
+  write(root, `${TDIR}/plain.yaml`, COMPLETE);
+  return root;
+};
+
+test("council section: rosters, sums, chairs and flags", (t) => {
+  const root = councilCorpus(gitRepo()); cleanup(t, root);
+  const d = json(root);
+  assert.equal(d.council.length, 2);
+  assert.deepEqual(d.council[0].roster, ["p/alpha:xhigh", "p/delta:high"]);
+  assert.equal(d.council[0].runs, 2);
+  assert.deepEqual(d.council[0].flags, []);
+  const big = d.council[1];
+  assert.deepEqual(big.roster, ["p/alpha:xhigh", "p/beta:high", "p/gamma:high", "p/zero:high"]);
+  assert.equal(big.runs, 6);
+  assert.deepEqual(big.members["p/alpha:xhigh"].total, { blocker: 6, major: 18, minor: 6 });
+  assert.equal(big.members["p/alpha:xhigh"].dispatches, 6);
+  assert.equal(big.members["p/gamma:high"].dispatches, 12);
+  assert.equal(big.members["p/alpha:xhigh"].unique_applied_nonminor_per_run, 1);
+  assert.equal(big.members["p/gamma:high"].unique_applied_nonminor_per_run, 0);
+  assert.deepEqual(big.chairs, [
+    { model: "p/chair:medium", runs: 4, avg_clusters: 6, avg_members_reported: 3, retried_runs: 1 },
+    { model: "p/other:high", runs: 2, avg_clusters: 6, avg_members_reported: 3, retried_runs: 0 },
+  ]);
+  assert.deepEqual(big.flags.map((f) => [f.member, f.rule]), [
+    ["p/gamma:high", "low_unique_applied"], ["p/gamma:high", "high_rejection"],
+    ["p/zero:high", "low_unique_applied"],
+  ]);
+  assert.equal(big.flags[0].detail, "0.00 unique-and-applied blocker/major per run in 6 runs (total 0/6/24)");
+  assert.equal(big.flags[1].detail, "rejected 80% vs p/alpha:xhigh 20% (total 0/6/24)");
+  assert.equal(big.flags[2].detail, "0.00 unique-and-applied blocker/major per run in 6 runs (total 0/0/0)");
+  const r = invoke(root);
+  assert.equal(r.status, 0, r.stderr);
+  const at = r.lines.indexOf("council");
+  assert.ok(at > 0);
+  assert.equal(r.lines[at + 1], "severity is the chair's consolidated severity (highest any co-raiser assigned), not the member's own");
+  assert.equal(r.lines[at + 2], "roster (2 runs): p/alpha:xhigh, p/delta:high");
+  assert.match(r.lines[at + 3], /^  member\s+total\s+unique\s+applied\s+uniq_appl\s+deferred\s+rejected\s+uniq_appl_nonminor\/run$/);
+  assert.ok(r.lines.includes("  not enough runs to assess (2 of 5)"));
+  assert.ok(r.lines.includes("roster (6 runs): p/alpha:xhigh, p/beta:high, p/gamma:high, p/zero:high"));
+  assert.match(r.lines.find((l) => /^  p\/alpha:xhigh\s+6\/18\/6\s/.test(l)), /^  p\/alpha:xhigh\s+6\/18\/6\s+0\/6\/6\s+6\/18\/0\s+0\/6\/0\s+0\/0\/0\s+0\/0\/6\s+1\.00$/);
+  assert.ok(r.lines.includes("  chair: p/chair:medium - 4 runs, avg 6.0 clusters from 3.0 members reported, retried in 1"));
+  assert.ok(r.lines.includes("  chair: p/other:high - 2 runs, avg 6.0 clusters from 3.0 members reported, retried in 0"));
+  assert.ok(r.lines.includes("  flag: p/gamma:high - 0.00 unique-and-applied blocker/major per run in 6 runs (total 0/6/24)"));
+  assert.ok(r.lines.includes("  flag: p/gamma:high - rejected 80% vs p/alpha:xhigh 20% (total 0/6/24)"));
+});
+
+test("council section: --since and no council data", (t) => {
+  const root = councilCorpus(gitRepo()); cleanup(t, root);
+  const d = json(root, ["--since", "5.21.0"]);
+  assert.equal(d.council.length, 1);
+  assert.deepEqual(d.council[0].roster, ["p/alpha:xhigh", "p/delta:high"]);
+  const plain = corpus(gitRepo()); cleanup(t, plain);
+  assert.deepEqual(json(plain).council, []);
+  const r = invoke(plain);
+  const at = r.lines.indexOf("council");
+  assert.ok(at > 0);
+  assert.equal(r.lines[at + 1], "no council data in selected records");
+  const empty = gitRepo(); cleanup(t, empty);
+  const none = invoke(empty);
+  assert.match(none.lines[1], /^no records found/);
+  assert.equal(none.lines.length, 2);
+});

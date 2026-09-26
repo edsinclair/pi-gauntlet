@@ -4,6 +4,7 @@ import {
   capEvents, derive, diffPhases, emptyAccumulators, emptyPhases, foldAccumulators, implementAutoCompletes,
   newRecord, parseRecord, serializeRecord, type Accumulators, type TelemetryEvent,
 } from "./telemetry-record.ts";
+import type { CouncilBlock } from "./telemetry-council.ts";
 
 const ev = (over: Partial<TelemetryEvent> & { kind: string }): TelemetryEvent =>
   ({ ts: "2026-09-17T10:00:00Z", session: "s1", phase: "unphased", ...over }) as TelemetryEvent;
@@ -165,3 +166,28 @@ test("parseRecord drops malformed accumulator blocks and fills missing fields", 
   assert.equal(derive(parsed, "2026-09-17T10:01:00Z").amendments, 2);
 });
 
+const COUNCIL: CouncilBlock = {
+  chair: { model: "p/chair:medium", dispatches: 1, clusters: 2, members_reported: 2 },
+  members: {
+    "p/alpha:xhigh": { dispatches: 1, total: { blocker: 0, major: 1, minor: 1 }, unique: { blocker: 0, major: 1, minor: 0 }, applied: { blocker: 0, major: 1, minor: 0 }, unique_applied: { blocker: 0, major: 1, minor: 0 }, deferred: { blocker: 0, major: 0, minor: 0 }, rejected: { blocker: 0, major: 0, minor: 1 } },
+    "p/beta:high": { dispatches: 2, total: { blocker: 0, major: 0, minor: 1 }, unique: { blocker: 0, major: 0, minor: 0 }, applied: { blocker: 0, major: 0, minor: 0 }, unique_applied: { blocker: 0, major: 0, minor: 0 }, deferred: { blocker: 0, major: 0, minor: 0 }, rejected: { blocker: 0, major: 0, minor: 1 } },
+  },
+};
+
+test("derive carries derived.council through like tests/diff; absent stays absent", () => {
+  const rec = newRecord({ spec: "doc/specs/a.md", session: "s1", now: "2026-09-17T10:00:00Z", runId: "r1" });
+  assert.equal(derive(rec, "2026-09-17T10:01:00Z").council, undefined);
+  rec.derived.council = COUNCIL;
+  assert.deepEqual(derive(rec, "2026-09-17T10:01:00Z").council, COUNCIL);
+});
+
+test("serializeRecord writes council.chair and each member as flow maps under block keys; parseRecord round-trips", () => {
+  const rec = newRecord({ spec: "doc/specs/a.md", session: "s1", now: "2026-09-17T10:00:00Z", runId: "r1" });
+  rec.derived.council = COUNCIL;
+  const text = serializeRecord(rec);
+  assert.match(text, /^  council:\n    chair: \{ model: p\/chair:medium, dispatches: 1, clusters: 2, members_reported: 2 \}\n    members:\n      p\/alpha:xhigh: \{ dispatches: 1, total: \{ blocker: 0, major: 1, minor: 1 \}/m);
+  assert.match(text, /^      p\/beta:high: \{ dispatches: 2, /m);
+  assert.deepEqual(parseRecord(text)!.derived.council, COUNCIL);
+  const plain = newRecord({ spec: "doc/specs/a.md", session: "s1", now: "2026-09-17T10:00:00Z", runId: "r2" });
+  assert.equal(parseRecord(serializeRecord(plain))!.derived.council, undefined);
+});

@@ -24,6 +24,7 @@
   import { COUNTED_USER_PHASES, REVIEWER_AGENTS, countFindings, countOpenGaps, hasReopen, insertedText, planTotals, textOf, usageToTokens } from "./lib/telemetry-collect.ts";
   import { addTokens, capEvents, compact, currentPhase, derive, diffPhases, emptyAccumulators, emptyPhases, foldAccumulators, implementAutoCompletes, liveShipEvent, newRecord, parseRecord, serializeRecord, type Accumulators, type BaseEvent, type PhaseAcc, type PhaseKey, type PhaseMap, type TelemetryEvent, type TelemetryRecord, type Tokens } from "./lib/telemetry-record.ts";
   import { guardReason } from "./lib/telemetry-ship.ts";
+  import { buildCouncil, parseAudit, parseChairReport, resolveMembers, type Cluster, type MemberResult } from "./lib/telemetry-council.ts";
 
   // ---- deps seam -------------------------------------------------------------------
 
@@ -204,6 +205,7 @@
     let settingsWarned = false;
     let sessionId = "";
     let currentDir = "";
+    let councilPending: { memberResults: MemberResult[]; chair?: { model: string; dispatches: number; clusters?: Cluster[] } } | undefined;
 
     // Per-event settings read; undefined => this event is a no-op.
     const enabledSettings = (ctx: ExtensionContext): SettingsSnapshot | undefined => {
@@ -364,6 +366,7 @@
       record = undefined;
       recordRel = undefined;
       frozen = false;
+      councilPending = undefined;
     };
 
     const isSafeSpecLink = (link: string): boolean => {
@@ -432,6 +435,7 @@
               ? { kind: "phase", action: "reset" }
               : { kind: "phase", action: t.action, name: t.name },
         );
+        if (t.action === "start" && t.name === "brainstorm") councilPending = undefined;
         phases = details.phases;
         if (record && t.name === "brainstorm" && (t.action === "complete" || t.action === "skip")) record.approved_at ??= e.ts;
         if (record && t.name === "ship" && t.action === "complete" && checkoutVia === "jj") await onShipKeep(snap);
@@ -538,8 +542,9 @@
         }
         return onSpecInteraction(event.toolName, loc, event, snap);
       }
-      if (event.toolName === "subagent" && !event.isError) {
-        await onSubagentResult(event.details, event.content);
+      if (event.toolName === "subagent") {
+        if (phaseNow() === "brainstorm") onCouncilResults(event.details, event.content);
+        if (!event.isError) await onSubagentResult(event.details, event.content);
         return undefined;
       }
       if (event.toolName === "plan_tracker" && !event.isError) {
@@ -623,6 +628,42 @@
       if (!t) return;
       const acc = phaseAcc(k);
       acc.tokens = addTokens(acc.tokens, t);
+    };
+
+    const onCouncilResults = (details: unknown, content: unknown) => {
+      const results = (details as { results?: unknown[] } | undefined)?.results;
+      if (!Array.isArray(results) || !results.length) return;
+      const typed = results.map((raw) => raw as { agent?: unknown; exitCode?: unknown; model?: unknown; savedOutputPath?: unknown });
+      if (councilPending?.chair && typed.some((r) => r.agent === "spec-council-member")) councilPending = undefined;
+      for (const r of typed) {
+        if (r.agent === "spec-council-member") {
+          (councilPending ??= { memberResults: [] }).memberResults.push({
+            model: typeof r.model === "string" ? r.model : undefined,
+            exitCode: typeof r.exitCode === "number" ? r.exitCode : undefined,
+            savedOutputPath: typeof r.savedOutputPath === "string" ? r.savedOutputPath : undefined,
+          });
+        } else if (r.agent === "spec-council-synthesizer") {
+          const chair = ((councilPending ??= { memberResults: [] }).chair ??= { model: "unknown", dispatches: 0 });
+          if (typeof r.model === "string") chair.model = r.model;
+          chair.dispatches += 1;
+          const parsed = parseChairReport(textOf(content));
+          if (parsed) chair.clusters = parsed.clusters;
+        }
+      }
+    };
+
+    const onCouncilAudit = (content: unknown) => {
+      const pending = councilPending;
+      const clusters = pending?.chair?.clusters;
+      if (!record || !pending?.chair || !clusters) return;
+      const audit = parseAudit(textOf(content));
+      if (!audit) return;
+      const members = resolveMembers(pending.memberResults);
+      const block = members && buildCouncil({ chair: { ...pending.chair, clusters }, members, audit });
+      if (!block) return;
+      record.derived.council = block;
+      councilPending = undefined;
+      flush();
     };
 
     const onSubagentResult = async (details: unknown, content: unknown) => {
@@ -723,9 +764,10 @@
     pi.on("message_end", async (event, ctx) => {
       lastCtx = ctx;
       if (!enabledSettings(ctx)) return;
-      const msg = event.message as { role?: string; usage?: unknown };
+      const msg = event.message as { role?: string; usage?: unknown; content?: unknown };
       if (msg.role !== "assistant") return;
       addPhaseTokens(usageToTokens(msg.usage));
+      if (phaseNow() === "brainstorm") onCouncilAudit(msg.content);
     });
 
     pi.on("turn_end", async (_event, ctx) => {
