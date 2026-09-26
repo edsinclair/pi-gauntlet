@@ -7,22 +7,28 @@ import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { parse as parseYaml } from "yaml";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+const EVIDENCE_DF_FRACTION = 0.5;
+const MIN_EVIDENCE_TOKENS = 2;
+const SCORE_RATIO = 0.5;
+// Default banner grammar of skills/brainstorming/reference/superseding.md; a named-section
+// scope or anything after `- fully` keeps the spec live.
+const FULLY_BANNER = /^> \*\*Superseded by:\*\* \[.*\]\(.*\) - fully$/;
 const MIN_NODE = [24, 15, 0];
 const DRAFT_MARKER = "# CONTEXT DRAFT - NOT A SPEC - fully replaced at spec-writing";
 const EXCLUDE_LINE = "/.pi/gauntlet/index.sqlite*";
 const SKIP_DIRS = new Set([".worktrees", "node_modules", "build"]);
-const HEADER = ["score", "path", "service", "title", "status", "shipped_at", "files", "snippet"];
+const HEADER = ["score", "path", "service", "title", "status", "shipped_at", "state", "files", "snippet"];
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS meta  (key TEXT PRIMARY KEY, value TEXT);
   CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, mtime_ms INTEGER, size INTEGER);
   CREATE VIRTUAL TABLE IF NOT EXISTS specs USING fts5(
-    path UNINDEXED, service UNINDEXED, title, goal, headings, body,
+    path UNINDEXED, service UNINDEXED, title, goal, headings, body, state UNINDEXED,
     tokenize = 'porter unicode61');
 `;
 
 const usage = () => {
-  process.stderr.write('usage: gauntlet-spec-index --query "<text>" [--limit N]\n');
+  process.stderr.write('usage: gauntlet-spec-index --query "<text>" [--limit N] [--exclude <repo-relative path>]...\n');
   process.exit(1);
 };
 const die = (msg) => {
@@ -33,13 +39,15 @@ const die = (msg) => {
 function parseArgs(argv) {
   let query;
   let limit = 10;
+  const exclude = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--query" && argv[i + 1] !== undefined) query = argv[++i];
     else if (argv[i] === "--limit" && /^[1-9]\d*$/.test(argv[i + 1] ?? "")) limit = Number(argv[++i]);
+    else if (argv[i] === "--exclude" && argv[i + 1] !== undefined) exclude.push(argv[++i]);
     else usage();
   }
   if (query === undefined) usage();
-  return { query, limit };
+  return { query, limit, exclude };
 }
 
 function nodeOk() {
@@ -139,10 +147,19 @@ async function openDb(root) {
 
 function extract(text, path) {
   const lines = text.split(/\r?\n/);
-  const title = lines.find((l) => l.startsWith("# "))?.slice(2).trim() || basename(path, ".md");
+  const h1 = lines.findIndex((l) => l.startsWith("# "));
+  const title = (h1 >= 0 ? lines[h1].slice(2).trim() : "") || basename(path, ".md");
   const goal = lines.find((l) => l.startsWith("**Goal:**"))?.slice("**Goal:**".length).trim() ?? "";
   const headings = lines.filter((l) => /^##{1,2} /.test(l)).map((l) => l.replace(/^#+ /, "")).join("\n");
-  return { title, goal, headings };
+  let state = "live";
+  if (h1 >= 0) {
+    // Title block: everything after the H1 up to the first H2 heading or code fence.
+    for (const l of lines.slice(h1 + 1)) {
+      if (/^## /.test(l) || /^\s*(`{3,}|~{3,})/.test(l)) break;
+      if (FULLY_BANNER.test(l)) { state = "superseded"; break; }
+    }
+  }
+  return { title, goal, headings, state };
 }
 
 function refresh(db, root, corpus) {
@@ -150,7 +167,7 @@ function refresh(db, root, corpus) {
   const present = new Set(corpus.map((f) => f.path));
   const delSpec = db.prepare("DELETE FROM specs WHERE path = ?");
   const delFile = db.prepare("DELETE FROM files WHERE path = ?");
-  const insSpec = db.prepare("INSERT INTO specs (path, service, title, goal, headings, body) VALUES (?, ?, ?, ?, ?, ?)");
+  const insSpec = db.prepare("INSERT INTO specs (path, service, title, goal, headings, body, state) VALUES (?, ?, ?, ?, ?, ?, ?)");
   const putFile = db.prepare("INSERT OR REPLACE INTO files (path, mtime_ms, size) VALUES (?, ?, ?)");
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -162,7 +179,7 @@ function refresh(db, root, corpus) {
       delSpec.run(f.path);
       if (text.split(/\r?\n/, 1)[0] === DRAFT_MARKER) { delFile.run(f.path); continue; }
       const x = extract(text, f.path);
-      insSpec.run(f.path, f.service, x.title, x.goal, x.headings, text);
+      insSpec.run(f.path, f.service, x.title, x.goal, x.headings, text, x.state);
       putFile.run(f.path, f.mtime_ms, f.size);
     }
     db.exec("COMMIT");
@@ -172,8 +189,58 @@ function refresh(db, root, corpus) {
   }
 }
 
-const toMatch = (query) =>
-  query.split(/\s+/).filter((t) => t.length >= 2).map((t) => `"${t.replaceAll('"', '""')}"`).join(" OR ");
+const tokens = (query) => query.split(/[^\p{L}\p{N}\p{Co}]+/u).filter((t) => t.length >= 2);
+const quote = (t) => `"${t.replaceAll('"', '""')}"`;
+const toMatch = (toks) => toks.map(quote).join(" OR ");
+
+// Porter is not idempotent (manatee -> manate -> manat), so MATCH always receives an
+// original token; the vocab pass only decides which tokens are the same term.
+function representatives(db, toks) {
+  const mem = new db.constructor(":memory:");
+  try {
+    mem.exec("CREATE VIRTUAL TABLE q USING fts5(t, tokenize = 'porter unicode61'); CREATE VIRTUAL TABLE qi USING fts5vocab(q, 'instance')");
+    const ins = mem.prepare("INSERT INTO q (rowid, t) VALUES (?, ?)");
+    toks.forEach((t, i) => ins.run(i + 1, t));
+    const rep = new Map();
+    for (const r of mem.prepare("SELECT term, doc FROM qi ORDER BY doc, offset").all()) if (!rep.has(r.term)) rep.set(r.term, toks[r.doc - 1]);
+    return rep;
+  } finally {
+    mem.close();
+  }
+}
+
+function confidenceFilter(rows, evidence) {
+  return rows.filter((r) => {
+    const hits = evidence.filter((e) => e.all.has(r.rowid)).length;
+    const titleGoal = evidence.filter((e) => e.titleGoal.has(r.rowid)).length;
+    return hits >= MIN_EVIDENCE_TOKENS && titleGoal >= MIN_EVIDENCE_TOKENS;
+  });
+}
+
+function query(db, toks, { limit, exclude }) {
+  const n = db.prepare("SELECT count(*) AS n FROM specs").get().n;
+  const rowids = (match) => new Set(db.prepare("SELECT rowid FROM specs WHERE specs MATCH ?").all(match).map((r) => r.rowid));
+  const reps = representatives(db, toks);
+  const terms = [...new Set(reps.values())];
+  const evidence = [];
+  for (const tok of terms) {
+    const all = rowids(quote(tok));
+    if (all.size === 0 || all.size >= n * EVIDENCE_DF_FRACTION) continue;
+    evidence.push({ all, titleGoal: rowids(`title:${quote(tok)} OR goal:${quote(tok)}`) });
+  }
+  if (evidence.length < MIN_EVIDENCE_TOKENS) return [];
+  const rows = db.prepare(
+    `SELECT rowid, path, service, title, state,
+            bm25(specs, 0, 0, 10.0, 5.0, 2.0, 1.0, 0) AS score,
+            snippet(specs, 5, '', '', '...', 12) AS snippet
+     FROM specs WHERE specs MATCH ?`,
+  ).all(toMatch(terms)).filter((r) => !exclude.includes(r.path));
+  const kept = confidenceFilter(rows, evidence);
+  kept.sort((a, b) => (a.state !== "live") - (b.state !== "live") || a.score - b.score);
+  const best = kept.find((r) => r.state === "live");
+  const cut = best ? kept.filter((r) => Math.abs(r.score) >= SCORE_RATIO * Math.abs(best.score)) : kept;
+  return cut.slice(0, limit);
+}
 
 function telemetry(root, specPath) {
   const blank = { status: null, shipped_at: null, files: "" };
@@ -200,23 +267,17 @@ const filesCell = (v) => v.replace(/[\t\r\n]+/g, " ");
 
 async function main() {
   if (!nodeOk()) die(`gauntlet-spec-index needs Node >=24.15.0 (found ${process.versions.node})`);
-  const { query, limit } = parseArgs(process.argv.slice(2));
-  const match = toMatch(query);
-  if (!match) usage();
+  const { query: text, limit, exclude } = parseArgs(process.argv.slice(2));
+  const toks = tokens(text);
+  if (!toks.length) usage();
   const root = repoRoot();
   const db = await openDb(root);
   refresh(db, root, discover(root));
-  const rows = db.prepare(
-    `SELECT path, service, title,
-            bm25(specs, 0, 0, 10.0, 5.0, 2.0, 1.0) AS score,
-            snippet(specs, 5, '', '', '...', 12) AS snippet
-     FROM specs WHERE specs MATCH ?
-     ORDER BY score LIMIT ?`,
-  ).all(match, limit);
+  const rows = query(db, toks, { limit, exclude });
   const out = [HEADER.join("\t")];
   for (const r of rows) {
     const t = telemetry(root, r.path);
-    out.push([...[r.score.toFixed(3), r.path, r.service, r.title, t.status, t.shipped_at].map(cell), filesCell(t.files), cell(r.snippet)].join("\t"));
+    out.push([...[r.score.toFixed(3), r.path, r.service, r.title, t.status, t.shipped_at, r.state].map(cell), filesCell(t.files), cell(r.snippet)].join("\t"));
   }
   process.stdout.write(out.join("\n") + "\n");
   db.close();

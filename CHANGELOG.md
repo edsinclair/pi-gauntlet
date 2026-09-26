@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `gauntlet-spec-index` gains a `state` column after `shipped_at` (`superseded` for a `- fully` banner directly under the title, `live` otherwise) and a repeatable `--exclude <path>` flag. `/skill:brainstorming` runs a second predecessor query at spec self-review from the finished spec's title, goal, and H2 headings and lists new `live` candidates at the review gate; the scout composes its first query from the ticket title and body.
+
+### Changed
+
+- `gauntlet-spec-index` applies a confidence rule before `--limit`: only terms in fewer than half the specs count as evidence, a row needs two distinct evidence terms in title or goal, and rows under half the best live score are dropped, so queries with no real match return zero rows. Live rows sort before superseded rows. The cache schema is version 2 and rebuilds on first use.
+
 ## v5.21.0 - 2026-09-26
 
 ### Added

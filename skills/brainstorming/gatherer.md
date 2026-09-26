@@ -53,11 +53,13 @@ Scout (always dispatched):
 > instead; cite the old spec only for its unsuperseded sections (banner contract:
 > `reference/superseding.md`). Predecessor check: compose a 5-15 term keyword query
 > from the request (topic nouns, component names, file names - not stop words; if
-> the request is only a ticket reference, take the terms from the ticket title via
+> the request is only a ticket reference, take the terms from the ticket title and body via
 > the tracker CLI when one is available, otherwise use the fallback below). Run
 > `node <SPEC_INDEX> --query '<keywords>' --limit 10` from the worktree root,
 > keeping the keywords inside single quotes, and treat its rows as the candidate
-> list. If the command fails, fall back to listing the project's spec directory
+> list; zero rows means the index found no evidence, not that no predecessor exists -
+> judge `Predecessor: none` from the code recon. If the command fails, fall back to
+> listing the project's spec directory
 > and reading titles and `**Goal:**` lines, and write
 > `Spec index unavailable - predecessor check used directory listing.` in your
 > handoff. Either way open at
@@ -67,7 +69,8 @@ Scout (always dispatched):
 > Judge by topic; shared file paths never decide.
 > The `files` column of each candidate row is the `;`-separated list of repo-relative
 > paths that predecessor's ship modified and that still exist, or the literal `missing`,
-> or blank; do not recompute it from git or telemetry. After the `Predecessor:` line(s),
+> or blank; do not recompute it from git or telemetry. The `state` column is `live` or
+> `superseded`; cite a `superseded` row only through its successor. After the `Predecessor:` line(s),
 > and only when at least one predecessor is named, render a `Predecessor anchors`
 > section: list every attributed path exactly once, attributed to the first named
 > predecessor in index output order whose cell lists it, with no per-path commentary

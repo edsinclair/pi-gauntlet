@@ -44,7 +44,7 @@ Work through the items below **in order**. This is your own checklist to follow,
 4. **Understand the idea against the draft** - see [Understand the idea](#3-understand-the-idea).
 5. **Propose 2-3 approaches** - see [Explore approaches](#4-explore-approaches).
 6. **Present the design** - see [Present the design in two rounds](#6-present-the-design-in-two-rounds).
-7. **Write the spec** - follow [Spec Self-Review](#spec-self-review-before-user-review-gate) steps 1-4.
+7. **Write the spec** - follow [Spec Self-Review](#spec-self-review-before-user-review-gate) steps 1-5.
 8. **Spec self-review (lint)** - run the inline checks in [Spec Self-Review](#spec-self-review-before-user-review-gate).
 9. **Critique pass (auto-dispatched)** - use [Spec Council](#spec-council-optional).
 10. **Re-run placeholder scan** - follow [Spec Self-Review](#spec-self-review-before-user-review-gate).
@@ -163,7 +163,21 @@ Spec-writing replaces the context draft, in this exact order:
    `# CONTEXT DRAFT - NOT A SPEC - fully replaced at spec-writing` — before
    dispatching lint, critique, council, or summarizer. The phase-tracker commit
    guard is a backstop, not the primary check.
-4. **After the line-1 check and before the inline lint**, `edit` any known
+4. **After the line-1 check**, run the second predecessor pass. Compose a query from
+   the spec's H1 terms, then the terms of every H2 that is not a template heading
+   (Problem, Acceptance criteria, Design, Errors and edge cases, Tests, Documentation
+   impact, Out of scope, Open questions), then the `**Goal:**` line's terms - same
+   token rules as the scout, deduplicated, cut at 15. Run
+   `(cd <abs worktree path> && node <SPEC_INDEX> --query '<terms>' --limit 5 --exclude <spec path relative to the worktree>)`
+   with `<SPEC_INDEX>` resolved as in `gatherer.md`. Take the `live` rows and drop every
+   path the draft's `Predecessor:` line(s) named (retained from the step-1 read). Carry
+   the remainder to the gate as one adjacent line:
+   `New predecessor candidates at spec-writing: <path> (<title>), ... - index rows are a hint; code is the source and an absent row proves nothing.`
+   or `New predecessor candidates at spec-writing: none.` A non-zero exit degrades to
+   `Second predecessor pass unavailable: <first stderr line>`; it never blocks the gate
+   or the commit. "yes, <path> is a predecessor" at the gate is a change request that
+   adds the `supersedes <path>, <scope>` clause and the banner, then re-presents the gate.
+5. **After the second predecessor pass and before the inline lint**, `edit` any known
    predecessor spec to insert its supersession banner (see
    [Marking superseded specs](reference/superseding.md)). This position is fixed:
    the banner is written after any slug rename, so it always cites the final path.
@@ -244,6 +258,7 @@ Rejected: [<severity>] <cluster> — raised-by: [<slugs>] -> <one-line reason>
 (one line per item, exactly as returned by roasting-the-spec - `Applied: none` / `Deferred: none` / `Rejected: none` when a list is empty; omit the audit lines when the worker path ran, not the council)
 
 <unresolved ambiguities; every gap-footer entry from the summary>
+New predecessor candidates at spec-writing: <path> (<title>), ... - index rows are a hint; code is the source and an absent row proves nothing.
 
 Please review. Approve to proceed, tell me what to change in the spec, or say "revert applied council edit <X>" to undo a specific applied edit. Reply "auto-apply amends" - every later amend-class change in this flow then applies without review, scope changes included; redraws and the spec gate still stop. "approve, auto-apply amends" does both.
 ```
@@ -288,6 +303,7 @@ One question at a time, YAGNI, 2-3 approaches, two design rounds, clarify freely
 - Proposed-change execution before approval ([owner](#hard-constraint)).
 - Plan before approval; brainstorming invocation for an amend ([owner](#user-review-gate)).
 - Missing predecessor banner; invalid multi-spec split ([owner](#spec-self-review-before-user-review-gate); [owner](#2-scope-check)).
+- Gate reached without the second predecessor pass ([owner](#spec-self-review-before-user-review-gate)).
 - Approaches while a contradicted premise remains unresolved ([owner](#3-understand-the-idea)).
 - Amend without `reference/amendment-surface.md`; waiting after an amend grant; auto-applying a redraw ([owner](#amending-an-approved-spec)).
 
