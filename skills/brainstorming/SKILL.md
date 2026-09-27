@@ -104,7 +104,7 @@ Prefer clear testable boundaries, YAGNI, existing conventions, the owning schema
 
 ### 6. Present the design in two rounds
 
-Use two rounds, targeting 300-500 words each, with one approval each; revisions remain within that approval point. Ask once per round; round-1 approval without correction confirms the predecessor. Round 1 covers architecture, responsibilities, data flow, and `supersedes <path>, <scope>` when applicable. Round 2 covers errors, edges, tests, and `## Documentation impact`.
+Use two rounds, targeting 300-500 words each, with one approval each; revisions remain within that approval point. Ask once per round; round-1 approval without correction confirms the predecessor. Round 1 covers architecture, responsibilities, data flow, and `supersedes <path>, <scope>` when applicable. Round 2 covers errors, edges, tests, and `## Documentation impact`. In round 2, cite the draft's `Docs touched:` entries as candidates for "Materially amended existing docs"; admit or drop each by the materiality bar in `reference/documentation-impact.md`, never list them automatically.
 
 `## Documentation impact` is required. Cite `reference/documentation-impact.md` by relative path, do not restate its categories, and reproduce this template verbatim:
 

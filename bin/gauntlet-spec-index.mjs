@@ -1,13 +1,12 @@
 #!/usr/bin/env node
-// Lexical search over the spec corpus. Build-on-query: refresh a per-worktree
-// FTS5 cache by mtime+size, then rank with bm25 and join telemetry at output.
-import { readFileSync, appendFileSync, existsSync, statSync, readdirSync, mkdirSync, rmSync, realpathSync } from "node:fs";
-import { join, dirname, basename, isAbsolute } from "node:path";
+// Lexical search over spec and docs corpora (FTS5, bm25, shared confidence rule); telemetry joined for specs only.
+import { readFileSync, appendFileSync, existsSync, statSync, lstatSync, readdirSync, mkdirSync, rmSync, realpathSync, openSync, readSync, closeSync } from "node:fs";
+import { join, dirname, basename, isAbsolute, matchesGlob } from "node:path";
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { parse as parseYaml } from "yaml";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const EVIDENCE_DF_FRACTION = 0.5;
 const MIN_EVIDENCE_TOKENS = 2;
 const SCORE_RATIO = 0.5;
@@ -18,17 +17,23 @@ const MIN_NODE = [24, 15, 0];
 const DRAFT_MARKER = "# CONTEXT DRAFT - NOT A SPEC - fully replaced at spec-writing";
 const EXCLUDE_LINE = "/.pi/gauntlet/index.sqlite*";
 const SKIP_DIRS = new Set([".worktrees", "node_modules", "build"]);
-const HEADER = ["score", "path", "service", "title", "status", "shipped_at", "state", "files", "snippet"];
+const FENCE = /^\s*(`{3,}|~{3,})/;
+const DOC_INCLUDES = ["**/doc/**/*.md", "**/docs/**/*.md", "README.md", "AGENTS.md"];
+const DOC_EXCLUDES = ["**/doc/specs/**", "**/docs/specs/**", "**/doc/plans/**", "**/docs/plans/**", "**/node_modules/**", ".pi/gauntlet/**", ".worktrees/**"];
+const OVERRIDES_FILES = [".pi/gauntlet-overrides.md", "gauntlet-overrides.md", "doc/gauntlet-overrides.md"];
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS meta  (key TEXT PRIMARY KEY, value TEXT);
-  CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, mtime_ms INTEGER, size INTEGER);
+  CREATE TABLE IF NOT EXISTS files (corpus TEXT NOT NULL, path TEXT NOT NULL, mtime_ms INTEGER, size INTEGER, PRIMARY KEY (corpus, path));
   CREATE VIRTUAL TABLE IF NOT EXISTS specs USING fts5(
     path UNINDEXED, service UNINDEXED, title, goal, headings, body, state UNINDEXED,
+    tokenize = 'porter unicode61');
+  CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(
+    path UNINDEXED, title, headings, body,
     tokenize = 'porter unicode61');
 `;
 
 const usage = () => {
-  process.stderr.write('usage: gauntlet-spec-index --query "<text>" [--limit N] [--exclude <repo-relative path>]...\n');
+  process.stderr.write('usage: gauntlet-spec-index --query "<text>" [--corpus specs|docs] [--limit N] [--exclude <repo-relative path>]...\n');
   process.exit(1);
 };
 const die = (msg) => {
@@ -38,16 +43,18 @@ const die = (msg) => {
 
 function parseArgs(argv) {
   let query;
+  let corpus = "specs";
   let limit = 10;
   const exclude = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--query" && argv[i + 1] !== undefined) query = argv[++i];
+    else if (argv[i] === "--corpus" && Object.hasOwn(CORPORA, argv[i + 1] ?? "")) corpus = argv[++i];
     else if (argv[i] === "--limit" && /^[1-9]\d*$/.test(argv[i + 1] ?? "")) limit = Number(argv[++i]);
     else if (argv[i] === "--exclude" && argv[i + 1] !== undefined) exclude.push(argv[++i]);
     else usage();
   }
   if (query === undefined) usage();
-  return { query, limit, exclude };
+  return { query, corpus, limit, exclude };
 }
 
 function nodeOk() {
@@ -88,11 +95,64 @@ function discover(root) {
     }
   };
   collect("doc/specs", "root");
-  const entries = readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-  for (const e of entries) {
-    if (e.name.startsWith(".") || SKIP_DIRS.has(e.name)) continue;
-    if (!e.isDirectory() && !e.isSymbolicLink()) continue;
-    collect(`${e.name}/doc/specs`, e.name);
+  for (const s of services(root).sort((a, b) => a.localeCompare(b))) collect(`${s}/doc/specs`, s);
+  return out;
+}
+
+// Top-level directories discover() would scan; a slash-free include also matches one level under them.
+function services(root) {
+  return readdirSync(root, { withFileTypes: true })
+    .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith(".") && !SKIP_DIRS.has(e.name))
+    .map((e) => e.name);
+}
+
+function includes(root) {
+  const file = OVERRIDES_FILES.map((rel) => join(root, rel)).find((abs) => existsSync(abs));
+  if (!file) return DOC_INCLUDES;
+  const globs = [];
+  let inSection = false;
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    die(`gauntlet-spec-index: unreadable overrides file ${file}: ${e.message}`);
+  }
+  for (const line of text.split(/\r?\n/)) {
+    if (/^## /.test(line)) { inSection = line.trim() === "## Spec index"; continue; }
+    if (!inSection) continue;
+    const m = /^-\s+docs:\s*(.+?)\s*$/.exec(line);
+    if (m) globs.push(m[1].replace(/^[`"']+|[`"']+$/g, ""));
+  }
+  return globs.length ? globs : DOC_INCLUDES;
+}
+
+function firstLine(abs) {
+  const fd = openSync(abs, "r");
+  try {
+    const buf = Buffer.alloc(128);
+    const n = readSync(fd, buf, 0, 128, 0);
+    return buf.toString("utf8", 0, n).split(/\r?\n/, 1)[0];
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function discoverDocs(root, globs) {
+  const svc = services(root);
+  const patterns = globs.flatMap((g) => (g.includes("/") ? [g] : [g, ...svc.map((s) => `${s}/${g}`)]));
+  const listed = execFileSync("git", ["-C", root, "ls-files", "-co", "--exclude-standard", "-z", "--", "*.md"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\0").filter(Boolean);
+  const out = [];
+  for (const rel of listed) {
+    if (!patterns.some((p) => matchesGlob(rel, p))) continue;
+    if (DOC_EXCLUDES.some((p) => matchesGlob(rel, p))) continue;
+    let st;
+    try {
+      st = lstatSync(join(root, rel));
+      if (!st.isFile() || firstLine(join(root, rel)) === DRAFT_MARKER) continue;
+    } catch {
+      continue;
+    }
+    out.push({ path: rel, mtime_ms: Math.trunc(st.mtimeMs), size: st.size });
   }
   return out;
 }
@@ -145,17 +205,34 @@ async function openDb(root) {
   }
 }
 
+function fenceMask(lines) {
+  const mask = new Array(lines.length).fill(false);
+  let open = null;
+  for (let i = 0; i < lines.length; i++) {
+    const m = FENCE.exec(lines[i]);
+    if (open) {
+      mask[i] = true;
+      if (m && m[1][0] === open.ch && m[1].length >= open.len) open = null;
+    } else if (m) {
+      mask[i] = true;
+      open = { ch: m[1][0], len: m[1].length };
+    }
+  }
+  return mask;
+}
+
 function extract(text, path) {
   const lines = text.split(/\r?\n/);
-  const h1 = lines.findIndex((l) => l.startsWith("# "));
+  const fenced = fenceMask(lines);
+  const h1 = lines.findIndex((l, i) => !fenced[i] && l.startsWith("# "));
   const title = (h1 >= 0 ? lines[h1].slice(2).trim() : "") || basename(path, ".md");
   const goal = lines.find((l) => l.startsWith("**Goal:**"))?.slice("**Goal:**".length).trim() ?? "";
-  const headings = lines.filter((l) => /^##{1,2} /.test(l)).map((l) => l.replace(/^#+ /, "")).join("\n");
+  const headings = lines.filter((l, i) => !fenced[i] && /^##{1,2} /.test(l)).map((l) => l.replace(/^#+ /, "")).join("\n");
   let state = "live";
   if (h1 >= 0) {
     // Title block: everything after the H1 up to the first H2 heading or code fence.
     for (const l of lines.slice(h1 + 1)) {
-      if (/^## /.test(l) || /^\s*(`{3,}|~{3,})/.test(l)) break;
+      if (/^## /.test(l) || FENCE.test(l)) break;
       if (FULLY_BANNER.test(l)) { state = "superseded"; break; }
     }
   }
@@ -163,24 +240,25 @@ function extract(text, path) {
 }
 
 function refresh(db, root, corpus) {
-  const known = new Map(db.prepare("SELECT path, mtime_ms, size FROM files").all().map((r) => [r.path, r]));
-  const present = new Set(corpus.map((f) => f.path));
-  const delSpec = db.prepare("DELETE FROM specs WHERE path = ?");
-  const delFile = db.prepare("DELETE FROM files WHERE path = ?");
-  const insSpec = db.prepare("INSERT INTO specs (path, service, title, goal, headings, body, state) VALUES (?, ?, ?, ?, ?, ?, ?)");
-  const putFile = db.prepare("INSERT OR REPLACE INTO files (path, mtime_ms, size) VALUES (?, ?, ?)");
+  const { table } = corpus;
+  const found = corpus.discover(root);
+  const known = new Map(db.prepare("SELECT path, mtime_ms, size FROM files WHERE corpus = ?").all(table).map((r) => [r.path, r]));
+  const present = new Set(found.map((f) => f.path));
+  const delRow = db.prepare(`DELETE FROM ${table} WHERE path = ?`);
+  const delFile = db.prepare("DELETE FROM files WHERE corpus = ? AND path = ?");
+  const insRow = db.prepare(`INSERT INTO ${table} (${corpus.columns.join(", ")}) VALUES (${corpus.columns.map(() => "?").join(", ")})`);
+  const putFile = db.prepare("INSERT OR REPLACE INTO files (corpus, path, mtime_ms, size) VALUES (?, ?, ?, ?)");
   db.exec("BEGIN IMMEDIATE");
   try {
-    for (const path of known.keys()) if (!present.has(path)) { delSpec.run(path); delFile.run(path); }
-    for (const f of corpus) {
+    for (const path of known.keys()) if (!present.has(path)) { delRow.run(path); delFile.run(table, path); }
+    for (const f of found) {
       const k = known.get(f.path);
       if (k && k.mtime_ms === f.mtime_ms && k.size === f.size) continue;
       const text = readFileSync(join(root, f.path), "utf8");
-      delSpec.run(f.path);
-      if (text.split(/\r?\n/, 1)[0] === DRAFT_MARKER) { delFile.run(f.path); continue; }
-      const x = extract(text, f.path);
-      insSpec.run(f.path, f.service, x.title, x.goal, x.headings, text, x.state);
-      putFile.run(f.path, f.mtime_ms, f.size);
+      delRow.run(f.path);
+      if (text.split(/\r?\n/, 1)[0] === DRAFT_MARKER) { delFile.run(table, f.path); continue; }
+      insRow.run(...corpus.row(text, f));
+      putFile.run(table, f.path, f.mtime_ms, f.size);
     }
     db.exec("COMMIT");
   } catch (e) {
@@ -212,32 +290,32 @@ function representatives(db, toks) {
 function confidenceFilter(rows, evidence) {
   return rows.filter((r) => {
     const hits = evidence.filter((e) => e.all.has(r.rowid)).length;
-    const titleGoal = evidence.filter((e) => e.titleGoal.has(r.rowid)).length;
-    return hits >= MIN_EVIDENCE_TOKENS && titleGoal >= MIN_EVIDENCE_TOKENS;
+    const strong = evidence.filter((e) => e.strong.has(r.rowid)).length;
+    return hits >= MIN_EVIDENCE_TOKENS && strong >= MIN_EVIDENCE_TOKENS;
   });
 }
 
-function query(db, toks, { limit, exclude }) {
-  const n = db.prepare("SELECT count(*) AS n FROM specs").get().n;
-  const rowids = (match) => new Set(db.prepare("SELECT rowid FROM specs WHERE specs MATCH ?").all(match).map((r) => r.rowid));
+function query(db, corpus, toks, { limit, exclude }) {
+  const { table } = corpus;
+  const n = db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n;
+  const rowids = (match) => new Set(db.prepare(`SELECT rowid FROM ${table} WHERE ${table} MATCH ?`).all(match).map((r) => r.rowid));
   const reps = representatives(db, toks);
   const terms = [...new Set(reps.values())];
   const evidence = [];
   for (const tok of terms) {
     const all = rowids(quote(tok));
     if (all.size === 0 || all.size >= n * EVIDENCE_DF_FRACTION) continue;
-    evidence.push({ all, titleGoal: rowids(`title:${quote(tok)} OR goal:${quote(tok)}`) });
+    evidence.push({ all, strong: rowids(corpus.strong.map((f) => `${f}:${quote(tok)}`).join(" OR ")) });
   }
   if (evidence.length < MIN_EVIDENCE_TOKENS) return [];
   const rows = db.prepare(
-    `SELECT rowid, path, service, title, state,
-            bm25(specs, 0, 0, 10.0, 5.0, 2.0, 1.0, 0) AS score,
-            snippet(specs, 5, '', '', '...', 12) AS snippet
-     FROM specs WHERE specs MATCH ?`,
+    `SELECT rowid, ${corpus.select}, bm25(${table}, ${corpus.weights.map((w) => w.toFixed(1)).join(", ")}) AS score
+     FROM ${table} WHERE ${table} MATCH ?`,
   ).all(toMatch(terms)).filter((r) => !exclude.includes(r.path));
   const kept = confidenceFilter(rows, evidence);
-  kept.sort((a, b) => (a.state !== "live") - (b.state !== "live") || a.score - b.score);
-  const best = kept.find((r) => r.state === "live");
+  const live = (r) => !corpus.hasState || r.state === "live";
+  kept.sort((a, b) => Number(!live(a)) - Number(!live(b)) || a.score - b.score);
+  const best = kept.find(live);
   const cut = best ? kept.filter((r) => Math.abs(r.score) >= SCORE_RATIO * Math.abs(best.score)) : kept;
   return cut.slice(0, limit);
 }
@@ -265,20 +343,60 @@ const cell = (v) => (v === null || v === undefined ? "" : String(v).replace(/\s+
 // Paths keep their spaces; only column and row delimiters are neutralised.
 const filesCell = (v) => v.replace(/[\t\r\n]+/g, " ");
 
+function docSnippet(r) {
+  if (!r.hsnip.includes("\u0001")) return r.bsnip;
+  const fragment = r.hsnip.split("\n").find((line) => line.includes("\u0001")).replace(/[\u0001\u0002]/g, "");
+  return r.headings.split("\n").find((line) => line.includes(fragment));
+}
+
+const CORPORA = {
+  specs: {
+    table: "specs",
+    columns: ["path", "service", "title", "goal", "headings", "body", "state"],
+    strong: ["title", "goal"],
+    weights: [0, 0, 10, 5, 2, 1, 0],
+    hasState: true,
+    header: ["score", "path", "service", "title", "status", "shipped_at", "state", "files", "snippet"],
+    select: "path, service, title, state, snippet(specs, 5, '', '', '...', 12) AS snippet",
+    discover,
+    row: (text, f) => {
+      const x = extract(text, f.path);
+      return [f.path, f.service, x.title, x.goal, x.headings, text, x.state];
+    },
+    format: (root, r) => {
+      const t = telemetry(root, r.path);
+      return [...[r.score.toFixed(3), r.path, r.service, r.title, t.status, t.shipped_at, r.state].map(cell), filesCell(t.files), cell(r.snippet)];
+    },
+  },
+  docs: {
+    table: "docs",
+    columns: ["path", "title", "headings", "body"],
+    strong: ["title", "headings"],
+    weights: [0, 10, 3, 1],
+    hasState: false,
+    header: ["score", "path", "title", "snippet"],
+    select: "path, title, headings, snippet(docs, 2, '\u0001', '\u0002', '', 12) AS hsnip, snippet(docs, 3, '', '', '...', 12) AS bsnip",
+    discover: (root) => discoverDocs(root, includes(root)),
+    row: (text, f) => {
+      const x = extract(text, f.path);
+      return [f.path, x.title, x.headings, text];
+    },
+    format: (root, r) => [r.score.toFixed(3), r.path, r.title, docSnippet(r)].map(cell),
+  },
+};
+
 async function main() {
   if (!nodeOk()) die(`gauntlet-spec-index needs Node >=24.15.0 (found ${process.versions.node})`);
-  const { query: text, limit, exclude } = parseArgs(process.argv.slice(2));
+  const { query: text, corpus: name, limit, exclude } = parseArgs(process.argv.slice(2));
   const toks = tokens(text);
   if (!toks.length) usage();
   const root = repoRoot();
+  const corpus = CORPORA[name];
   const db = await openDb(root);
-  refresh(db, root, discover(root));
-  const rows = query(db, toks, { limit, exclude });
-  const out = [HEADER.join("\t")];
-  for (const r of rows) {
-    const t = telemetry(root, r.path);
-    out.push([...[r.score.toFixed(3), r.path, r.service, r.title, t.status, t.shipped_at, r.state].map(cell), filesCell(t.files), cell(r.snippet)].join("\t"));
-  }
+  refresh(db, root, corpus);
+  const rows = query(db, corpus, toks, { limit, exclude });
+  const out = [corpus.header.join("\t")];
+  for (const r of rows) out.push(corpus.format(root, r).join("\t"));
   process.stdout.write(out.join("\n") + "\n");
   db.close();
 }

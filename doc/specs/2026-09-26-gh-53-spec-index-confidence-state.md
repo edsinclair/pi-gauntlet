@@ -1,5 +1,7 @@
 # Spec index: confidence cutoff, dead-spec demotion, second predecessor pass
 
+> **Superseded by:** [doc/specs/2026-09-26-gh-54-docs-corpus-index.md](./2026-09-26-gh-54-docs-corpus-index.md) - Component 1 Query steps 1, 3, 4, 5, 6-7 (table name, strong fields, weights and state-aware sort become corpus-descriptor driven) and the Scope-limit sentence "the bin reads no overrides file" only
+
 **Ticket:** jjuraszek/pi-gauntlet#53
 **Goal:** Make `bin/gauntlet-spec-index.mjs` return only rows that are real predecessor evidence - fewer than `--limit`, down to zero - label fully superseded specs `superseded` and sort them after live rows, and re-run the predecessor query at spec-writing from the finished spec's own title, goal, and headings.
 

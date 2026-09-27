@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `gauntlet-spec-index` gains `--corpus specs|docs` (default `specs`, output unchanged). `--corpus docs` indexes project documentation - tracked and untracked non-gitignored `*.md` files matching `**/doc/**/*.md`, `**/docs/**/*.md`, `README.md`, `AGENTS.md`, replaceable through `- docs: <glob>` bullets under `## Spec index` in the gauntlet overrides file - into a second FTS5 table in the same cache, minus `doc(s)/specs`, `doc(s)/plans`, `node_modules`, `.pi/gauntlet`, `.worktrees`, symlinks and context drafts, and prints `score`, `path`, `title`, `snippet`. Both corpora share one confidence rule driven by a corpus descriptor (strong fields `title`/`goal` for specs, `title`/`headings` for docs). The brainstorming scout runs the docs query and renders `Docs touched: <path> - <section heading>` lines that round 2 weighs as documentation-impact candidates.
+
+### Changed
+
+- Spec-index cache schema is 3 (the `files` table is keyed by `(corpus, path)`); existing caches rebuild on first query. `#`/`##`/`###` lines inside fenced code blocks no longer count as the title or headings in either corpus.
+
 ## v5.22.0 - 2026-09-26
 
 ### Added

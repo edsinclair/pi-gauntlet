@@ -82,7 +82,22 @@ Scout (always dispatched):
 > from the directory-listing fallback) contributes no path and no `missing` line. When
 > no path and no `missing` line results - including whenever the index was unavailable -
 > omit the section entirely; `Predecessor: none` produces no anchors section. The anchors
-> are a recon hint, never a selection input. End with an
+> are a recon hint, never a selection input.
+> Docs check: run `node <SPEC_INDEX> --corpus docs --query '<the same keywords>' --limit 10`
+> from the worktree root. Its rows are project documentation that already speaks about the
+> request's topic; open at most five whose topic matches and let them inform the "already
+> solves this?" finding and the current-contract recon. If the command fails, write
+> `Docs index unavailable - docs check used recon only.` in your handoff and continue. After
+> the `Predecessor:` line(s) and any `Predecessor anchors` section, render at most
+> five `Docs touched: <path> - <section heading>` lines, one per document that
+> genuinely covers the request's topic - an opened index row or a document your own
+> recon found - where
+> `<section heading>` is the `##`/`###` heading of the covering section as read in the
+> document (the row's `snippet` column is a hint to it), or the document title when no single
+> section applies; or `Docs touched: none`. Judge by topic; a lexical hit alone is not
+> coverage. Zero rows means the index found no evidence, not that no document covers the
+> topic. This query supplements the code and documentation recon you already perform; it
+> never replaces it - keep reading the files the request touches. End with an
 > "Open questions that matter for the spec"
 > section. Compact handoff, not a dump.
 

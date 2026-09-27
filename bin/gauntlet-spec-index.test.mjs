@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, symlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -10,6 +10,22 @@ import { DatabaseSync } from "node:sqlite";
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "gauntlet-spec-index.mjs");
 const DRAFT = "# CONTEXT DRAFT - NOT A SPEC - fully replaced at spec-writing";
 const HEADER = ["score", "path", "service", "title", "status", "shipped_at", "state", "files", "snippet"];
+const DOCS_HEADER = ["score", "path", "title", "snippet"];
+const docFiller = (n) => `# Filler ${n}\n\n## Design\n\nnothing of note here\n`;
+const decoy = "# ptarmigan gannet decoy\n\n## ptarmigan gannet\n\nbody\n";
+const docsRepo = () => {
+  const root = gitRepo();
+  write(root, "doc/guide.md", "# Guide\n\n## Configuring the ptarmigan gannet\n\nprose about setup\n");
+  write(root, "README.md", "# Repo\n\nThe body mentions ptarmigan once.\n");
+  for (let n = 1; n <= 4; n++) write(root, `doc/filler-${n}.md`, docFiller(n));
+  for (const p of ["doc/specs/a.md", "docs/specs/b.md", "doc/plans/p.md", "docs/plans/q.md", "node_modules/x/doc/a.md", "build/doc/b.md", ".pi/gauntlet/n.md", ".worktrees/w/doc/g.md"]) write(root, p, decoy);
+  write(root, ".gitignore", "build/\n");
+  write(root, "doc/draft.md", `${DRAFT}\n\n## ptarmigan gannet\n`);
+  commit(root);
+  return root;
+};
+const docsPaths = (root) => withDb(root, (db) => db.prepare("SELECT path FROM docs ORDER BY path").all().map((r) => r.path));
+const overrides = (root, globs) => write(root, ".pi/gauntlet-overrides.md", `## Issue tracker\ntracker: none\n\n## Spec index\n${globs.map((g) => `- docs: \`${g}\``).join("\n")}\n\n## release\nnothing\n`);
 
 const write = (root, rel, text) => {
   mkdirSync(join(root, dirname(rel)), { recursive: true });
@@ -44,7 +60,7 @@ const repo = () => {
 const run = (cwd, args) => {
   const r = spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: "utf8" });
   const lines = r.stdout.split("\n").filter(Boolean);
-  return { status: r.status, stderr: r.stderr, header: lines[0]?.split("\t"), rows: lines.slice(1).map((l) => l.split("\t")) };
+  return { status: r.status, stderr: r.stderr, stdout: r.stdout, header: lines[0]?.split("\t"), rows: lines.slice(1).map((l) => l.split("\t")) };
 };
 const paths = (res) => res.rows.map((r) => r[1]);
 const withDb = (root, fn) => {
@@ -104,7 +120,7 @@ test("4: schema_version mismatch rebuilds the db", (t) => {
   const r = run(root, ["--query", "zephyr widget"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(paths(r).length, 2);
-  assert.equal(withDb(root, (database) => database.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value), "2");
+  assert.equal(withDb(root, (database) => database.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value), "3");
 });
 
 test("5: a non-SQLite database is rebuilt", (t) => {
@@ -114,7 +130,7 @@ test("5: a non-SQLite database is rebuilt", (t) => {
   const r = run(root, ["--query", "zephyr widget"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(paths(r), ["doc/specs/a.md", "svc-a/doc/specs/b.md"]);
-  assert.equal(withDb(root, (database) => database.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value), "2");
+  assert.equal(withDb(root, (database) => database.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value), "3");
 });
 
 test("6: telemetry join is output-only and tolerant", (t) => {
@@ -339,4 +355,206 @@ test("16: punctuation splits into distinct evidence terms and query order does n
   assert.equal(distinct.status, 0, distinct.stderr);
   assert.deepEqual(paths(distinct), ["doc/specs/cfg.md"]);
   assert.deepEqual(paths(run(root, ["--query", "config config-file"])), paths(run(root, ["--query", "config-file config"])));
+});
+
+test("D1: --corpus specs and omitted --corpus are byte-identical; nine columns", (t) => {
+  const root = repo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const plain = run(root, ["--query", "zephyr widget"]);
+  const explicit = run(root, ["--query", "zephyr widget", "--corpus", "specs"]);
+  assert.equal(explicit.status, 0, explicit.stderr);
+  assert.equal(explicit.stdout, plain.stdout);
+  assert.deepEqual(explicit.header, HEADER);
+});
+
+test("D11: unknown --corpus exits 1 with usage", (t) => {
+  const root = repo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = run(root, ["--query", "zephyr widget", "--corpus", "notes"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /usage:/);
+  assert.equal(run(root, ["--query", "zephyr widget", "--corpus"]).status, 1);
+});
+
+test("D12: a schema 2 cache is rebuilt to 3 with both tables present", (t) => {
+  const root = repo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  run(root, ["--query", "zephyr widget"]);
+  withDb(root, (database) => database.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run());
+  const r = run(root, ["--query", "zephyr widget"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(withDb(root, (database) => database.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value), "3");
+  const tables = withDb(root, (database) => database.prepare("SELECT name FROM sqlite_master WHERE name IN ('specs', 'docs') ORDER BY name").all().map((row) => row.name));
+  assert.deepEqual(tables, ["docs", "specs"]);
+  const cols = withDb(root, (database) => database.prepare("PRAGMA table_info(files)").all().map((row) => row.name));
+  assert.deepEqual(cols, ["corpus", "path", "mtime_ms", "size"]);
+});
+
+test("D10-specs: a `## ` line inside a code fence is not a heading", (t) => {
+  const root = repo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/specs/fenced.md", "# Fenced pelican\n\n**Goal:** pelican.\n\n```markdown\n## Not a heading pelican\n```\n\n## Real heading\n");
+  run(root, ["--query", "zephyr widget"]);
+  const h = withDb(root, (database) => database.prepare("SELECT headings FROM specs WHERE path = 'doc/specs/fenced.md'").get().headings);
+  assert.equal(h, "Real heading");
+});
+
+test("D2: docs include defaults and fixed exclusions", (t) => {
+  const root = docsRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.header, DOCS_HEADER);
+  assert.deepEqual(paths(r), ["doc/guide.md"]);
+  assert.equal(r.rows[0].length, 4);
+  assert.deepEqual(docsPaths(root), ["README.md", ...[1, 2, 3, 4].map((n) => `doc/filler-${n}.md`), "doc/guide.md"]);
+  overrides(root, [".pi/**/*.md", ".worktrees/**/*.md", "doc/**/*.md"]);
+  assert.equal(run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]).status, 0);
+  assert.deepEqual(docsPaths(root), [".pi/gauntlet-overrides.md", ...[1, 2, 3, 4].map((n) => `doc/filler-${n}.md`), "doc/guide.md"]);
+  const two = gitRepo();
+  t.after(() => rmSync(two, { recursive: true, force: true }));
+  write(two, "doc/x.md", decoy);
+  write(two, "doc/y.md", decoy);
+  commit(two);
+  const tiny = run(two, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
+  assert.equal(tiny.status, 0, tiny.stderr);
+  assert.deepEqual(tiny.header, DOCS_HEADER);
+  assert.deepEqual(tiny.rows, []);
+});
+
+test("D3: shared confidence rejects common body-only hits", (t) => {
+  const root = gitRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/strong.md", "# Strong heron ibis\n\n## jackal\n\nbody\n");
+  for (let n = 1; n <= 5; n++) write(root, `doc/p${n}.md`, `# Plain doc ${n}\n\nThe body mentions the common shared vocabulary.\n`);
+  commit(root);
+  const r = run(root, ["--corpus", "docs", "--query", "heron ibis jackal common", "--limit", "10"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r), ["doc/strong.md"]);
+});
+
+test("D4: no cross-corpus leakage", (t) => {
+  const root = repo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/guide.md", "# zephyr widget guide\n\n## zephyr widget\n");
+  for (let n = 1; n <= 4; n++) write(root, `doc/filler-${n}.md`, docFiller(n));
+  assert.deepEqual(paths(run(root, ["--query", "zephyr widget"])), ["doc/specs/a.md", "svc-a/doc/specs/b.md"]);
+  const docs = run(root, ["--corpus", "docs", "--query", "zephyr widget"]);
+  assert.deepEqual(paths(docs), ["doc/guide.md"]);
+  assert.deepEqual(docs.header, DOCS_HEADER);
+});
+
+test("D5: independent cache refresh in both directions", (t) => {
+  const root = repo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/guide.md", "# Guide\n\n## zephyr widget\n");
+  run(root, ["--query", "zephyr widget"]);
+  run(root, ["--corpus", "docs", "--query", "zephyr widget"]);
+  const files = () => withDb(root, (db) => Object.fromEntries(db.prepare("SELECT corpus, path, mtime_ms FROM files").all().map((r) => [`${r.corpus}:${r.path}`, r.mtime_ms])));
+  const before = files();
+  utimesSync(join(root, "doc/specs/a.md"), new Date(), new Date(Date.now() + 5000));
+  run(root, ["--corpus", "docs", "--query", "zephyr widget"]);
+  assert.deepEqual(files(), before);
+  run(root, ["--query", "zephyr widget"]);
+  assert.notEqual(files()["specs:doc/specs/a.md"], before["specs:doc/specs/a.md"]);
+  assert.equal(files()["docs:doc/guide.md"], before["docs:doc/guide.md"]);
+  assert.deepEqual(docsPaths(root), ["doc/guide.md"]);
+});
+
+test("D6: overrides replace defaults but cannot bypass exclusions", (t) => {
+  const root = docsRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "notes/a.md", decoy);
+  write(root, "CONTRIBUTING.md", decoy);
+  write(root, "svc/CONTRIBUTING.md", decoy);
+  write(root, "svc/doc/inner.md", decoy);
+  commit(root);
+  const search = () => run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
+  overrides(root, ["notes/**/*.md"]);
+  assert.equal(search().status, 0);
+  assert.deepEqual(docsPaths(root), ["notes/a.md"]);
+  overrides(root, ["**/*.md"]);
+  assert.equal(search().status, 0);
+  const all = docsPaths(root);
+  for (const p of ["doc/specs/a.md", "docs/specs/b.md", "doc/plans/p.md", "docs/plans/q.md", "node_modules/x/doc/a.md", "build/doc/b.md", "doc/draft.md", ".pi/gauntlet/n.md", ".worktrees/w/doc/g.md"]) assert.ok(!all.includes(p), p);
+  assert.ok(all.includes("doc/guide.md"));
+  overrides(root, ["CONTRIBUTING.md"]);
+  assert.equal(search().status, 0);
+  assert.deepEqual(docsPaths(root), ["CONTRIBUTING.md", "svc/CONTRIBUTING.md"]);
+  write(root, ".pi/gauntlet-overrides.md", "## Spec index\n\nno bullets here\n");
+  assert.equal(search().status, 0);
+  assert.ok(docsPaths(root).includes("doc/guide.md"));
+  assert.ok(docsPaths(root).includes("svc/doc/inner.md"));
+});
+
+test("D6b: overrides file resolution order", (t) => {
+  const root = docsRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/gauntlet-overrides.md", "## Spec index\n- docs: `notes/**/*.md`\n");
+  write(root, "notes/a.md", decoy);
+  const search = () => run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
+  assert.equal(search().status, 0);
+  assert.deepEqual(docsPaths(root), ["notes/a.md"]);
+  write(root, "gauntlet-overrides.md", "## Spec index\n- docs: `other/**/*.md`\n");
+  write(root, "other/b.md", decoy);
+  assert.equal(search().status, 0);
+  assert.deepEqual(docsPaths(root), ["other/b.md"]);
+  overrides(root, ["doc/**/*.md"]);
+  assert.equal(search().status, 0);
+  assert.deepEqual(docsPaths(root), ["doc/filler-1.md", "doc/filler-2.md", "doc/filler-3.md", "doc/filler-4.md", "doc/gauntlet-overrides.md", "doc/guide.md"]);
+});
+
+test("D7: heading hits are strong, body-only hits are not", (t) => {
+  const root = gitRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/h.md", "# H\n\n## Setup\n\n## Feeding the kudu wombat\n\nprose\n");
+  write(root, "doc/b.md", "# B\n\n## Setup\n\nkudu wombat in the body only\n");
+  for (let n = 1; n <= 4; n++) write(root, `doc/filler-${n}.md`, docFiller(n));
+  commit(root);
+  const r = run(root, ["--corpus", "docs", "--query", "kudu wombat"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r), ["doc/h.md"]);
+});
+
+test("D8: snippet selects heading line or body fallback", (t) => {
+  const root = gitRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const longHeading = "Feeding the wandering herds across twelve distant valleys before finally finding the kudu wombat";
+  write(root, "doc/h.md", `# H\n\n## Setup\n\n## ${longHeading}\n\nprose\n`);
+  write(root, "doc/t.md", "# lynx ocelot title\n\n## Unrelated\n\nbody says lynx ocelot here\n");
+  for (let n = 1; n <= 4; n++) write(root, `doc/filler-${n}.md`, docFiller(n));
+  commit(root);
+  const heading = run(root, ["--corpus", "docs", "--query", "kudu wombat"]);
+  assert.deepEqual(paths(heading), ["doc/h.md"]);
+  assert.equal(heading.rows[0][3], longHeading);
+  const body = run(root, ["--corpus", "docs", "--query", "lynx ocelot"]);
+  assert.deepEqual(paths(body), ["doc/t.md"]);
+  assert.match(body.rows[0][3], /body says lynx ocelot/);
+  assert.doesNotMatch(body.rows[0][3], /[\u0001\u0002]/);
+});
+
+test("D9: deleted files and symlinks are skipped, stale rows removed", (t) => {
+  const root = docsRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/gone.md", "# Gone\n\n## ptarmigan gannet\n");
+  commit(root);
+  run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
+  assert.ok(docsPaths(root).includes("doc/gone.md"));
+  rmSync(join(root, "doc/gone.md"));
+  symlinkSync(join(root, "doc/specs/a.md"), join(root, "doc/link.md"));
+  symlinkSync(join(root, "doc/nowhere.md"), join(root, "doc/dangling.md"));
+  const r = run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r), ["doc/guide.md"]);
+  for (const p of ["doc/gone.md", "doc/link.md", "doc/dangling.md"]) assert.ok(!docsPaths(root).includes(p), p);
+  assert.equal(withDb(root, (db) => db.prepare("SELECT count(*) AS c FROM files WHERE corpus = 'docs' AND path = 'doc/gone.md'").get().c), 0);
+});
+
+test("D10: fenced headings and shorter nested fences are ignored", (t) => {
+  const root = docsRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/f.md", "# F\n\n```\n## kudu wombat\n```\n\nbody\n");
+  write(root, "doc/nested.md", "# N\n\n````markdown\n```js\n## inner heading\n```\n## still fenced\n````\n");
+  run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
+  for (const p of ["doc/f.md", "doc/nested.md"]) assert.equal(withDb(root, (db) => db.prepare("SELECT headings FROM docs WHERE path = ?").get(p).headings), "");
 });

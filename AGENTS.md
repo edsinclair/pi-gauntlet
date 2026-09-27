@@ -123,7 +123,7 @@ Bin sources live in `src/bins/`; the shipped `bin/gauntlet-telemetry-seal.mjs` a
 | Want to ... | Read |
 |---|---|
 | Workflow overview, install, Claude Code setup, overrides-file contract, lineage | [`README.md`](README.md) |
-| Search the spec corpus | [`README.md#spec-search-index`](README.md#spec-search-index) |
+| Search the spec and docs corpora | [`README.md#spec-search-index`](README.md#spec-search-index) |
 | What changed across versions | [`CHANGELOG.md`](CHANGELOG.md) |
 | Persona roster, frontmatter knobs, thinking budgets, where personas land | [`doc/personas.md`](doc/personas.md) |
 | `piGauntlet.*` settings, `gauntlet_setting` / `plan_check` tools, flow guards | [`doc/configuration.md`](doc/configuration.md) |
