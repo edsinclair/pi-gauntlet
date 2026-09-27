@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `gauntlet-spec-index` prints a one-line stderr note (`<corpus> corpus has <n> documents - too small for the confidence rule; no rows returned`) when a query returns no rows on a corpus under 10 documents; stdout and exit code are unchanged. The brainstorming scout carries the reason as `Predecessor: none (specs corpus too small: <n> documents)` / `Docs touched: none (docs corpus too small: <n> documents)`.
+
 ## v5.23.0 - 2026-09-27
 
 ### Added

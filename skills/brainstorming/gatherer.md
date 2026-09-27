@@ -58,7 +58,11 @@ Scout (always dispatched):
 > `node <SPEC_INDEX> --query '<keywords>' --limit 10` from the worktree root,
 > keeping the keywords inside single quotes, and treat its rows as the candidate
 > list; zero rows means the index found no evidence, not that no predecessor exists -
-> judge `Predecessor: none` from the code recon. If the command fails, fall back to
+> judge `Predecessor: none` from the code recon. When the command output contains a line
+> ending "too small for the confidence rule; no rows returned" (a diagnostic, not a row) and
+> the code recon names no predecessor, write
+> `Predecessor: none (specs corpus too small: <n> documents)`, copying <n> from that
+> line. If the command fails, fall back to
 > listing the project's spec directory
 > and reading titles and `**Goal:**` lines, and write
 > `Spec index unavailable - predecessor check used directory listing.` in your
@@ -96,7 +100,10 @@ Scout (always dispatched):
 > document (the row's `snippet` column is a hint to it), or the document title when no single
 > section applies; or `Docs touched: none`. Judge by topic; a lexical hit alone is not
 > coverage. Zero rows means the index found no evidence, not that no document covers the
-> topic. This query supplements the code and documentation recon you already perform; it
+> topic. When the docs command output contains that same diagnostic line and the recon
+> found no covering document, write
+> `Docs touched: none (docs corpus too small: <n> documents)` instead. This query
+> supplements the code and documentation recon you already perform; it
 > never replaces it - keep reading the files the request touches. End with an
 > "Open questions that matter for the spec"
 > section. Compact handoff, not a dump.

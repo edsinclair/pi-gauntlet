@@ -1,5 +1,7 @@
 # Spec index: project documentation as a second corpus
 
+> **Superseded by:** [doc/specs/2026-09-27-spec-index-small-corpus-note.md](./2026-09-27-spec-index-small-corpus-note.md) - the `## Edge cases` small-corpus row only (a docs corpus of two or fewer files: the scout now writes `Docs touched: none (docs corpus too small: <n> documents)` and the bin prints a stderr note)
+
 **Ticket:** jjuraszek/pi-gauntlet#54
 **Goal:** Give `bin/gauntlet-spec-index.mjs` a `--corpus docs` mode that indexes a project's Markdown documentation (default: `doc/`, `docs/`, `README.md`, `AGENTS.md`; overridable per project) into a second FTS5 table in the same cache, ranks and filters it through the same corpus-agnostic confidence rule the specs corpus uses, and gives the brainstorming scout a fixed `Docs touched:` line so `## Documentation impact` starts from evidence instead of memory.
 

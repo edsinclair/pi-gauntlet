@@ -205,6 +205,9 @@ const tokenChecks = [
   ["skills/brainstorming/gatherer.md", "Predecessor anchors", true],
   ["skills/brainstorming/gatherer.md", "modified file list missing for this spec", true],
   ["skills/brainstorming/gatherer.md", "Judge by topic; shared file paths never decide.", true],
+  ["skills/brainstorming/gatherer.md", "too small for the confidence rule; no rows returned", true],
+  ["skills/brainstorming/gatherer.md", "Predecessor: none (specs corpus too small:", true],
+  ["skills/brainstorming/gatherer.md", "Docs touched: none (docs corpus too small:", true],
   // absent (retired rules)
   ["skills/verification-before-completion/reference/conformance-check.md", "always** defers to the finish gate", false],
   ["skills/verification-before-completion/reference/conformance-check.md", "`accept`/`rescope`/`UNAUTHORIZED`", false],

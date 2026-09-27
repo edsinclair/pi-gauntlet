@@ -43,6 +43,16 @@ const commit = (root) => {
 };
 // Fillers keep the corpus large enough that two-document probe terms stay below N/2.
 const filler = (n) => `# Filler ${n}\n\n**Goal:** filler goal ${n}.\n\n## Design\n\nnothing of note here\n`;
+const boundaryRepo = (fillers) => {
+  const root = gitRepo();
+  const common = (n) => `# Plain spec ${n}\n\n**Goal:** plain goal ${n}.\n\nThe body mentions the common shared vocabulary.\n`;
+  write(root, "doc/specs/strong.md", "# Strong heron ibis\n\n**Goal:** heron ibis jackal.\n\nbody\n");
+  for (let n = 1; n <= 5; n++) write(root, `doc/specs/p${n}.md`, common(n));
+  for (const f of fillers) write(root, `doc/specs/filler-${f}.md`, filler(f));
+  commit(root);
+  return root;
+};
+const NOTE = "too small for the confidence rule; no rows returned";
 
 const repo = () => {
   const root = gitRepo();
@@ -357,6 +367,50 @@ test("16: punctuation splits into distinct evidence terms and query order does n
   assert.deepEqual(paths(run(root, ["--query", "config config-file"])), paths(run(root, ["--query", "config-file config"])));
 });
 
+test("21: three-spec corpus, no match - header only plus the small-corpus note", (t) => {
+  const root = gitRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const n of ["one", "two", "three"]) write(root, `doc/specs/filler-${n}.md`, filler(n));
+  commit(root);
+  const r = run(root, ["--query", "yeti unicorn"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.header, HEADER);
+  assert.deepEqual(r.rows, []);
+  assert.equal(r.stderr, `gauntlet-spec-index: specs corpus has 3 documents - ${NOTE}\n`);
+});
+
+test("22: MIN_CORPUS boundary - note at N = 9, silent at N = 10, rows unaffected", (t) => {
+  const root = boundaryRepo(["one", "two", "three"]);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const nine = run(root, ["--query", "yeti unicorn"]);
+  assert.equal(nine.status, 0, nine.stderr);
+  assert.deepEqual(nine.rows, []);
+  assert.equal(nine.stderr, `gauntlet-spec-index: specs corpus has 9 documents - ${NOTE}\n`);
+  write(root, "doc/specs/filler-four.md", filler("four"));
+  commit(root);
+  for (const q of ["yeti unicorn", "common shared"]) {
+    const r = run(root, ["--query", q]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.header, HEADER);
+    assert.deepEqual(r.rows, []);
+    assert.equal(r.stderr, "");
+  }
+  const strong = run(root, ["--query", "heron ibis jackal common", "--limit", "10"]);
+  assert.equal(strong.status, 0, strong.stderr);
+  assert.deepEqual(paths(strong), ["doc/specs/strong.md"]);
+  assert.equal(strong.stderr, "");
+});
+
+test("23: n is the table count before --exclude", (t) => {
+  const root = boundaryRepo(["one", "two", "three", "four"]);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = run(root, ["--query", "yeti unicorn", "--exclude", "doc/specs/p1.md"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.header, HEADER);
+  assert.deepEqual(r.rows, []);
+  assert.equal(r.stderr, "");
+});
+
 test("D1: --corpus specs and omitted --corpus are byte-identical; nine columns", (t) => {
   const root = repo();
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -420,6 +474,7 @@ test("D2: docs include defaults and fixed exclusions", (t) => {
   assert.equal(tiny.status, 0, tiny.stderr);
   assert.deepEqual(tiny.header, DOCS_HEADER);
   assert.deepEqual(tiny.rows, []);
+  assert.equal(tiny.stderr, `gauntlet-spec-index: docs corpus has 2 documents - ${NOTE}\n`);
 });
 
 test("D3: shared confidence rejects common body-only hits", (t) => {
@@ -557,4 +612,16 @@ test("D10: fenced headings and shorter nested fences are ignored", (t) => {
   write(root, "doc/nested.md", "# N\n\n````markdown\n```js\n## inner heading\n```\n## still fenced\n````\n");
   run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
   for (const p of ["doc/f.md", "doc/nested.md"]) assert.equal(withDb(root, (db) => db.prepare("SELECT headings FROM docs WHERE path = ?").get(p).headings), "");
+});
+
+test("D13: five-document docs corpus with rare heading terms returns rows and no note", (t) => {
+  const root = gitRepo();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "doc/strong.md", "# Strong doc\n\n## heron ibis\n\n## jackal\n\nbody\n");
+  for (let n = 1; n <= 4; n++) write(root, `doc/p${n}.md`, `# Plain doc ${n}\n\nThe body mentions the common shared vocabulary.\n`);
+  commit(root);
+  const r = run(root, ["--corpus", "docs", "--query", "heron ibis jackal common", "--limit", "10"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r), ["doc/strong.md"]);
+  assert.equal(r.stderr, "");
 });

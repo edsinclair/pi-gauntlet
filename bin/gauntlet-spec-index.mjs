@@ -10,6 +10,8 @@ const SCHEMA_VERSION = 3;
 const EVIDENCE_DF_FRACTION = 0.5;
 const MIN_EVIDENCE_TOKENS = 2;
 const SCORE_RATIO = 0.5;
+// Policy floor, not derived from the rule: below it an empty result says little about coverage.
+const MIN_CORPUS = 10;
 // Default banner grammar of skills/brainstorming/reference/superseding.md; a named-section
 // scope or anything after `- fully` keeps the spec live.
 const FULLY_BANNER = /^> \*\*Superseded by:\*\* \[.*\]\(.*\) - fully$/;
@@ -307,7 +309,7 @@ function query(db, corpus, toks, { limit, exclude }) {
     if (all.size === 0 || all.size >= n * EVIDENCE_DF_FRACTION) continue;
     evidence.push({ all, strong: rowids(corpus.strong.map((f) => `${f}:${quote(tok)}`).join(" OR ")) });
   }
-  if (evidence.length < MIN_EVIDENCE_TOKENS) return [];
+  if (evidence.length < MIN_EVIDENCE_TOKENS) return { rows: [], n };
   const rows = db.prepare(
     `SELECT rowid, ${corpus.select}, bm25(${table}, ${corpus.weights.map((w) => w.toFixed(1)).join(", ")}) AS score
      FROM ${table} WHERE ${table} MATCH ?`,
@@ -317,7 +319,7 @@ function query(db, corpus, toks, { limit, exclude }) {
   kept.sort((a, b) => Number(!live(a)) - Number(!live(b)) || a.score - b.score);
   const best = kept.find(live);
   const cut = best ? kept.filter((r) => Math.abs(r.score) >= SCORE_RATIO * Math.abs(best.score)) : kept;
-  return cut.slice(0, limit);
+  return { rows: cut.slice(0, limit), n };
 }
 
 function telemetry(root, specPath) {
@@ -394,10 +396,13 @@ async function main() {
   const corpus = CORPORA[name];
   const db = await openDb(root);
   refresh(db, root, corpus);
-  const rows = query(db, corpus, toks, { limit, exclude });
+  const { rows, n } = query(db, corpus, toks, { limit, exclude });
   const out = [corpus.header.join("\t")];
   for (const r of rows) out.push(corpus.format(root, r).join("\t"));
   process.stdout.write(out.join("\n") + "\n");
+  if (rows.length === 0 && n < MIN_CORPUS) {
+    process.stderr.write(`gauntlet-spec-index: ${name} corpus has ${n} documents - too small for the confidence rule; no rows returned\n`);
+  }
   db.close();
 }
 
