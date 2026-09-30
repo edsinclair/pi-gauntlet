@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Brainstorming questionary questions offer 2-4 labeled options and end `Recommendation: <letter> - <why>`; this format overrides `AGENTS.md` chat-style rules. Would-be yes/no or "may I" decisions are made and stated as assumptions instead of asked. A contradicted load-bearing premise is stated with its source and the design continues on it (the user overrides in reply) rather than blocking on accept-or-override. `deviates:`/`deferred:` dispositions are asked only when they change what the user observes post-ship, with the dispositions as the options; ticket-recorded decisions are adopted and cited unless a cited contradiction prevents it. Supersedes the gh-32 spec's accept-or-override and ask-even-when-ticket-recorded clauses.
+
 ## v6.1.0 - 2026-09-30
 
 ### Changed
