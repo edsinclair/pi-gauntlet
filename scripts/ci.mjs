@@ -594,7 +594,7 @@ try {
 }
 
 // ---- bin bundles: no runtime .ts imports, shebang intact (gh-39) -----------
-for (const b of ["bin/gauntlet-telemetry-seal.mjs", "bin/gauntlet-performance.mjs"]) {
+for (const b of ["bin/gauntlet-telemetry-seal.mjs", "bin/gauntlet-performance.mjs", "bin/gauntlet-spec-index.mjs"]) {
   const firstLine = readFileSync(R(b), "utf8").split("\n", 1)[0];
   if (firstLine !== "#!/usr/bin/env node") fail(`${b}: first line must be #!/usr/bin/env node`);
 }
@@ -608,7 +608,7 @@ ok("bin bundles self-contained (no relative .ts imports), shebangs intact");
 // ---- packed-install smoke (gh-39) -----------------------------------------
 try {
   execFileSync(process.execPath, [R("scripts/packed-install-smoke.test.mjs")], { stdio: "pipe" });
-  ok("packed-install smoke passes (both bins run from a scratch node_modules/pi-gauntlet)");
+  ok("packed-install smoke passes (all bins run from a scratch node_modules/pi-gauntlet)");
 } catch (e) {
   fail(`packed-install smoke failed:\n    ${String(e.stdout || e.stderr || e).split("\n").slice(0, 20).join("\n    ")}`);
 }

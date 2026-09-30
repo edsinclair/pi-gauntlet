@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Packed-install smoke (gh-39): the npm tarball, unpacked into a scratch
-// node_modules/pi-gauntlet, runs both bundled bins without
+// node_modules/pi-gauntlet, runs the bundled bins without
 // ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING. Never npm-installs the tarball -
 // its postinstall would re-point persona links in the real ~/.pi/agent* dirs.
 import { after, test } from "node:test";
@@ -92,6 +92,12 @@ test("performance: empty-corpus digest", () => {
   const r = run("bin/gauntlet-performance.mjs", ["--dir", corpusDir]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /no records found/);
+  assert.ok(!r.stderr.includes(CRASH), r.stderr);
+});
+
+test("spec-index: runs from the packed install (usage error, no crash)", () => {
+  const r = run("bin/gauntlet-spec-index.mjs", []);
+  assert.equal(r.status, 1);
   assert.ok(!r.stderr.includes(CRASH), r.stderr);
 });
 

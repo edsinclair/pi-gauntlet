@@ -10,6 +10,8 @@ import { parse as parseYaml } from "yaml";
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "gauntlet-telemetry-seal.mjs");
 const SPEC = "doc/specs/x.md";
 const REC = ".pi/gauntlet/telemetry/doc/specs/x.yaml";
+const SPEC2 = "docs/specs/y.md";
+const REC2 = ".pi/gauntlet/telemetry/docs/specs/y.yaml";
 const RECORD = [
   "schema: 1",
   "spec: doc/specs/x.md",
@@ -60,6 +62,19 @@ const repo = (options = {}) => {
   if (record !== undefined) write(root, REC, record);
   return root;
 };
+const docsRepo = () => {
+  const root = mkdtempSync(join(tmpdir(), "gts-"));
+  git(root, ["init", "-q", "-b", "main"]);
+  write(root, "README.md", "# fixture\n");
+  commit(root, "init", "README.md");
+  git(root, ["checkout", "-q", "-b", "feat"]);
+  write(root, SPEC2, "# Spec Y\n\n**Goal:** g.\n");
+  write(root, "src/a.ts", "export const a = 1;\n");
+  write(root, "docs/plans/x.md", "# Plan X\n");
+  commit(root, "Add spec and code", SPEC2, "src/a.ts", "docs/plans/x.md");
+  write(root, REC2, RECORD.replace("spec: doc/specs/x.md", `spec: ${SPEC2}`));
+  return root;
+};
 const EMPTY_AGENT = mkdtempSync(join(tmpdir(), "gts-empty-agent-"));
 process.on("exit", () => rmSync(EMPTY_AGENT, { recursive: true, force: true }));
 const IDENTITY = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
@@ -98,6 +113,61 @@ test("seals an untracked in_progress record: stamp, ship event, diff, re-derived
   assert.equal(headSubject(root), `telemetry: ${SPEC}`);
   assert.deepEqual(headFiles(root), [REC]);
   assert.equal(porcelain(root), "");
+});
+
+test("docs/specs record seals with --spec (no path classification)", (t) => {
+  const root = docsRepo(); cleanup(t, root);
+  const r = run(root, ["--spec", SPEC2]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.lines, [`sealed ${REC2}`]);
+});
+
+test("docs/specs record seals without --spec: candidates are records whose spec: is in the changed set", (t) => {
+  const root = docsRepo(); cleanup(t, root);
+  const r = run(root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.lines, [`sealed ${REC2}`]);
+  const rec = parseYaml(readFileSync(join(root, REC2), "utf8"));
+  assert.ok(!rec.derived.modified_files.includes("docs/plans/x.md"), "docs/plans excluded from modified_files");
+});
+
+test("renamed spec still selects the record at its old path", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gts-")); cleanup(t, root);
+  git(root, ["init", "-q", "-b", "main"]);
+  write(root, SPEC, "# Spec X\n\n**Goal:** g.\n");
+  commit(root, "Add original spec", SPEC);
+  git(root, ["checkout", "-q", "-b", "feat"]);
+  assert.equal(git(root, ["mv", SPEC, "doc/specs/renamed.md"]).status, 0);
+  commit(root, "Rename spec", SPEC, "doc/specs/renamed.md");
+  write(root, REC, RECORD);
+  const r = run(root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.lines, [`sealed ${REC}`]);
+});
+
+test("unparseable walked record warns while another candidate seals", (t) => {
+  const root = repo(); cleanup(t, root);
+  const bad = ".pi/gauntlet/telemetry/bad.yaml";
+  write(root, bad, "schema: 1\nspec: doc/specs/x.md\n");
+  const r = run(root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, `warning: unparseable record ${bad}`);
+  assert.deepEqual(r.lines, [`sealed ${REC}`]);
+});
+
+test("shipped-but-uncommitted docs/specs record is committed on retry without --spec", (t) => {
+  const root = docsRepo(); cleanup(t, root);
+  write(root, REC2, RECORD.replace("spec: doc/specs/x.md", `spec: ${SPEC2}`).replace("status: in_progress", "status: shipped\nshipped_at: 2026-09-17T18:00:00Z"));
+  const r = run(root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.lines, [`sealed ${REC2}`]);
+});
+
+test("a record whose spec did not change on the branch is ignored", (t) => {
+  const root = repo(); cleanup(t, root);
+  write(root, ".pi/gauntlet/telemetry/doc/specs/other.yaml", RECORD.replace("spec: doc/specs/x.md", "spec: doc/specs/other.md"));
+  const r = run(root);
+  assert.deepEqual(r.lines, [`sealed ${REC}`]);
 });
 
 test("seal preserves derived.council through the shipped stamp", (t) => {
@@ -256,11 +326,12 @@ test("usage and environment errors exit 1", (t) => {
   const noBase = invoke(["--worktree", root, "--option", "squash", "--base", "nope"]);
   assert.equal(noBase.status, 1);
   assert.equal(noBase.stderr, "no base ref nope");
-  for (const spec of ["/tmp/elsewhere/doc/specs/x.md", "README.md"]) {
-    const invalid = run(root, ["--spec", spec]);
-    assert.equal(invalid.status, 1);
-    assert.match(invalid.stderr, /^usage:/);
-  }
+  const invalid = run(root, ["--spec", "/tmp/elsewhere/doc/specs/x.md"]);
+  assert.equal(invalid.status, 1);
+  assert.match(invalid.stderr, /^usage:/);
+  const noRec = run(root, ["--spec", "README.md"]);
+  assert.equal(noRec.status, 2);
+  assert.equal(noRec.stderr, "no record at .pi/gauntlet/telemetry/README.yaml");
   write(root, ".pi/settings.json", JSON.stringify({ piGauntlet: { telemetry: { enabled: false } } }));
   const disabledInvalid = run(root, ["--spec", "/tmp/elsewhere/doc/specs/x.md"]);
   assert.equal(disabledInvalid.status, 1);

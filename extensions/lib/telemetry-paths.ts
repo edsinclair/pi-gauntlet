@@ -16,8 +16,13 @@ import { STMT_START } from "./phase-tracker-helpers.ts";
 
 export const toPosix = (p: string): string => p.split("\\").join("/");
 
-export const isSpecPath = (rel: string): boolean => /(^|\/)doc\/specs\/[^/]+\.md$/.test(rel);
-export const isPlanPath = (rel: string): boolean => /(^|\/)doc\/plans\/[^/]+\.md$/.test(rel);
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// Direct child .md of one configured dir, at the repo root or under any service prefix.
+const inDirs = (rel: string, dirs: readonly string[]): boolean =>
+  dirs.some((d) => new RegExp(`(^|/)${escapeRe(d)}/[^/]+\\.md$`).test(rel));
+
+export const isSpecPath = (rel: string, specDirs: readonly string[]): boolean => inDirs(rel, specDirs);
+export const isPlanPath = (rel: string, planDirs: readonly string[]): boolean => inDirs(rel, planDirs);
 
 // <dir>/<spec path with trailing .md replaced by .yaml>, nesting preserved.
 export const recordPathFor = (dir: string, specRel: string): string => `${dir}/${specRel.replace(/\.md$/, ".yaml")}`;

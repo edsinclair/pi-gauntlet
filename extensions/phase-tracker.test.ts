@@ -290,6 +290,19 @@ test("brainstorm write guard is unchanged by the implement guard", async () => {
   }
 });
 
+test("brainstorm write confinement: a docs/specs write under the default dirs does not warn", async () => {
+  const priorDepth = process.env.PI_SUBAGENT_DEPTH;
+  delete process.env.PI_SUBAGENT_DEPTH;
+  try {
+    const h = harness({ cwd: tempCwd(), branch: [phaseResult("start", phases({ brainstorm: "in_progress" }))] });
+    await h.emit("session_start");
+    await h.emitEvent("tool_call", writeCall("t1", "docs/specs/x.md"));
+    assert.equal((await h.emitEvent("tool_result", writeResult("t1")))[0], undefined);
+  } finally {
+    if (priorDepth !== undefined) process.env.PI_SUBAGENT_DEPTH = priorDepth;
+  }
+});
+
 test("resumed session: plan-implement recovery edge fires (AC 3)", async () => {
   const h = harness({ cwd: tempCwd(), branch: [...resumedBranch({ plan: "complete" }), assistant()] });
   await settle(h);
@@ -1242,6 +1255,17 @@ test("gauntlet_setting escalationLoop: setting absent -> ctx-derived main-loop m
   const set = harness({ cwd: tempCwd({ piGauntlet: { escalationLoop: { implModel: "p/strong:high" } } }), model: { provider: "p", id: "main" }, thinkingLevel: "medium" });
   const res = (await set.tools.find((t) => t.name === "gauntlet_setting")!.execute("g2", { key: "escalationLoop" }, undefined, undefined, set.ctx)) as { details: { implModel?: string } };
   assert.equal(res.details.implModel, "p/strong:high");
+});
+
+test("gauntlet_setting flowGuards: default dirs + derived plan dirs; repo override replaces them", async () => {
+  const h = harness({ cwd: tempCwd({ piGauntlet: {} }) });
+  const tool = h.tools.find((t) => t.name === "gauntlet_setting")!;
+  const def = (await tool.execute("f1", { key: "flowGuards" }, undefined, undefined, h.ctx)) as { details: unknown };
+  assert.deepEqual(def.details, { key: "flowGuards", enforce: true, specDirs: ["doc/specs", "docs/specs"], planDirs: ["doc/plans", "docs/plans"], errors: [] });
+  const set = harness({ cwd: tempCwd({ piGauntlet: { flowGuards: { specDirs: ["design/specs"] } } }) });
+  const res = (await set.tools.find((t) => t.name === "gauntlet_setting")!.execute("f2", { key: "flowGuards" }, undefined, undefined, set.ctx)) as { details: { specDirs: string[]; planDirs: string[] } };
+  assert.deepEqual(res.details.specDirs, ["design/specs"]);
+  assert.deepEqual(res.details.planDirs, ["design/plans"]);
 });
 
 // --- Conformance fix-loop dispatch guard (spec 2026-09-13-conformance-dispatch-guard) ---

@@ -25,10 +25,7 @@ for a base ref before reading any artifact.
 
 A pinned spec (seed route, `seed.md`) skips this section.
 
-Spec/plan directories: `piGauntlet.flowGuards.specDirs` plus each one's sibling `plans` directory. Resolve with the precedence `doc/configuration.md` documents for every `piGauntlet.*` key: the session cwd's `.pi/settings.json` if it defines `flowGuards`,
-else the active pi profile's `settings.json`, else the default `["doc/specs"]` (sibling
-`doc/plans`). An empty array is the default. `<dirs>` below is that resolved list,
-space-separated - never the literal defaults when a setting is present.
+Resolve with `gauntlet_setting({ key: "flowGuards" })`; `<dirs>` below is its `specDirs` plus `planDirs` (each spec dir's sibling `plans` dir), space-separated.
 
 ```bash
 git -C <worktree> diff --diff-filter=A --name-only <base>..HEAD -- <dirs>

@@ -14,7 +14,7 @@
   import * as piRuntime from "@earendil-works/pi-coding-agent";
   import { SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
   import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-  import { DEFAULT_TEST_COMMANDS, resolveTelemetry, settingsErrorWarning, type TelemetryResolved } from "./lib/gauntlet-settings.ts";
+  import { DEFAULT_TEST_COMMANDS, planDirsFor, resolveFlowGuards, resolveTelemetry, settingsErrorWarning, type TelemetryResolved } from "./lib/gauntlet-settings.ts";
   import { loadGauntletSettings } from "./lib/gauntlet-settings-loader.ts";
   import { checkoutOf } from "./lib/checkout.ts";
   import { CONTEXT_DRAFT_MARKER, nextGauntletEntered } from "./lib/phase-tracker-helpers.ts";
@@ -43,6 +43,8 @@
   }
   export interface SettingsSnapshot {
     telemetry: TelemetryResolved;
+    specDirs: string[];
+    planDirs: string[];
     errors: string[];
     agentOverrides?: Record<string, unknown>;
     versions: Record<string, string>;
@@ -118,6 +120,8 @@
   function realSettings(cwd: string): SettingsSnapshot {
     const { gauntlet, errors, root } = loadGauntletSettings(cwd);
     const telemetry = resolveTelemetry(gauntlet);
+    const { specDirs } = resolveFlowGuards(gauntlet);
+    const planDirs = planDirsFor(specDirs);
     const sm = SettingsManager.create(root, getAgentDir());
     const layer = (s: unknown) => ((s as { subagents?: { agentOverrides?: unknown } })?.subagents?.agentOverrides ?? undefined) as Record<string, unknown> | undefined;
     const preset = layer(sm.getGlobalSettings());
@@ -125,7 +129,7 @@
     const agentOverrides = preset || repo ? { ...(preset ?? {}), ...(repo ?? {}) } : undefined;
     const rawCmds = gauntlet.verifyBeforeShip?.testCommands;
     const testCommands = Array.isArray(rawCmds) && rawCmds.length > 0 && rawCmds.every((c) => typeof c === "string" && c.trim()) ? (rawCmds as string[]) : undefined;
-    return { telemetry, errors, agentOverrides, versions: realVersions(), testCommands };
+    return { telemetry, specDirs, planDirs, errors, agentOverrides, versions: realVersions(), testCommands };
   }
 
   export const realDeps: Deps = { fs: realFs, git: realGit, jj: realJj, now: isoNow, settings: realSettings };
@@ -142,16 +146,16 @@
   // gauntlet-resume's reconstruction skips brainstorm with `resume: <spec path>`; the path
   // is the bind candidate on that route because no spec write follows.
   const RESUME_REASON_RE = /^resume: (\S+)$/;
-  export function resumeSpecOf(phases: PhaseMap | undefined): string | undefined {
+  export function resumeSpecOf(phases: PhaseMap | undefined, specDirs: readonly string[]): string | undefined {
     const b = phases?.brainstorm;
     const m = b?.status === "skipped" && typeof b.reason === "string" ? RESUME_REASON_RE.exec(b.reason) : null;
-    return m && isSpecPath(toPosix(m[1])) ? m[1] : undefined;
+    return m && isSpecPath(toPosix(m[1]), specDirs) ? m[1] : undefined;
   }
 
   // Walks the session branch like phase-tracker.ts: successful phase_tracker results set
   // the phase map and the flow-entry marker; bind candidates are taken only while armed
   // and dropped on reset. Silent: no events are emitted.
-  export function replayBranch(entries: Iterable<unknown>): ReplayResult {
+  export function replayBranch(entries: Iterable<unknown>, specDirs: readonly string[]): ReplayResult {
     const out: ReplayResult = { phases: emptyPhases(), gauntletEntered: false };
     const calls = new Map<string, { name: string; args: unknown }>();
     for (const raw of entries) {
@@ -173,14 +177,14 @@
           out.planCheckSpec = undefined;
           out.lastSpecWrite = undefined;
         }
-        const resumed = d.action === "skip" ? resumeSpecOf(d.phases) : undefined;
+        const resumed = d.action === "skip" ? resumeSpecOf(d.phases, specDirs) : undefined;
         if (out.gauntletEntered && resumed) out.lastSpecWrite = resumed;
       } else if (msg.toolName === "plan_check") {
         const d = msg.details as { status?: string; specPath?: string } | undefined;
         if (out.gauntletEntered && d?.status === "pass" && typeof d.specPath === "string") out.planCheckSpec = d.specPath;
       } else if ((msg.toolName === "write" || msg.toolName === "edit") && !msg.isError && msg.toolCallId) {
         const p = (calls.get(msg.toolCallId)?.args as { path?: unknown } | undefined)?.path;
-        if (out.gauntletEntered && typeof p === "string" && isSpecPath(toPosix(p))) out.lastSpecWrite = p;
+        if (out.gauntletEntered && typeof p === "string" && isSpecPath(toPosix(p), specDirs)) out.lastSpecWrite = p;
       }
     }
     return out;
@@ -328,7 +332,7 @@
       predecessorLinks.clear();
       record = loadOrCreate(specRel);
       for (const link of record.supersedes ?? []) {
-        if (!isSafeSpecLink(link)) continue;
+        if (!isSafeSpecLink(link, snap.specDirs)) continue;
         const predecessor = deps.fs.readFile(abs(link));
         if (predecessor !== undefined && isSupersededByBanner(predecessor, record.spec)) predecessorLinks.add(link);
       }
@@ -369,9 +373,9 @@
       councilPending = undefined;
     };
 
-    const isSafeSpecLink = (link: string): boolean => {
+    const isSafeSpecLink = (link: string, specDirs: readonly string[]): boolean => {
       const normalized = posix.normalize(link);
-      return isSpecPath(link) && !posix.isAbsolute(link) && normalized !== ".." && !normalized.startsWith("../");
+      return isSpecPath(link, specDirs) && !posix.isAbsolute(link) && normalized !== ".." && !normalized.startsWith("../");
     };
 
     const refreshLinks = () => {
@@ -449,9 +453,9 @@
       }
       phases = details.phases;
       if (action === "skip" && !boundSpec && canBind() && lastCtx) {
-        const resumed = resumeSpecOf(details.phases);
+        const resumed = resumeSpecOf(details.phases, snap.specDirs);
         const loc = resumed ? await locate(lastCtx, resumed) : undefined;
-        if (loc && isSpecPath(loc.rel)) {
+        if (loc && isSpecPath(loc.rel, snap.specDirs)) {
           await bind(loc.rel, snap, loc.toplevel, loc.via);
           flush();
         }
@@ -481,13 +485,13 @@
       pendingTest.clear();
       sessionId = ctx.sessionManager.getSessionId();
       currentDir = snap.telemetry.dir;
-      const replay = replayBranch(ctx.sessionManager.getBranch());
+      const replay = replayBranch(ctx.sessionManager.getBranch(), snap.specDirs);
       phases = replay.phases;
       gauntletEntered = replay.gauntletEntered;
       if (!canBind()) return;
       const candidate = replay.planCheckSpec ?? replay.lastSpecWrite;
       const loc = candidate ? await locate(ctx, candidate) : undefined;
-      if (loc && isSpecPath(loc.rel)) {
+      if (loc && isSpecPath(loc.rel, snap.specDirs)) {
         await bind(loc.rel, snap, loc.toplevel, loc.via);
         flush();
       }
@@ -537,7 +541,7 @@
         const rawPath = (event.input as { path?: unknown }).path;
         const loc = typeof rawPath === "string" ? await locate(ctx, rawPath) : undefined;
         if (!loc) {
-          if (typeof rawPath === "string" && isSpecPath(toPosix(rawPath))) warn(`spec ${rawPath} is outside a git checkout; telemetry not recorded`);
+          if (typeof rawPath === "string" && isSpecPath(toPosix(rawPath), snap.specDirs)) warn(`spec ${rawPath} is outside a git checkout; telemetry not recorded`);
           return undefined;
         }
         return onSpecInteraction(event.toolName, loc, event, snap);
@@ -568,13 +572,13 @@
     const onSpecInteraction = async (tool: "write" | "edit" | "read", loc: { toplevel: string; rel: string; via: "git" | "jj" }, event: { input: unknown; content: unknown[] }, snap: SettingsSnapshot): Promise<unknown> => {
       const rel = loc.rel;
       if (!boundSpec) {
-        if ((tool === "write" || tool === "edit") && isSpecPath(rel)) {
+        if ((tool === "write" || tool === "edit") && isSpecPath(rel, snap.specDirs)) {
           await bind(rel, snap, loc.toplevel, loc.via);
           if (!boundSpec) return undefined;
           const patch = onBoundSpecWrite(tool, rel, event);
           flush();
           return patch;
-        } else if (isPlanPath(rel)) {
+        } else if (isPlanPath(rel, snap.planDirs)) {
           const spec = planSpecHeader(deps.fs.readFile(join(loc.toplevel, rel)) ?? "");
           const specRel = spec ? repoRelativeToolPath(loc.toplevel, loc.toplevel, spec) : undefined;
           if (specRel && deps.fs.exists(join(loc.toplevel, specRel))) {
@@ -586,7 +590,7 @@
       }
       if (loc.toplevel !== toplevel) {
         // Another checkout: a fresh run, never a rename of this record.
-        if ((tool === "write" || tool === "edit") && isSpecPath(rel) && canBind() && !sealedOnDisk(loc.toplevel, rel, snap.telemetry.dir)) {
+        if ((tool === "write" || tool === "edit") && isSpecPath(rel, snap.specDirs) && canBind() && !sealedOnDisk(loc.toplevel, rel, snap.telemetry.dir)) {
           unbind();
           await bind(rel, snap, loc.toplevel, loc.via);
           if (!boundSpec) return undefined;
@@ -602,13 +606,13 @@
         flush();
         return patch;
       }
-      if (tool === "write" && isSpecPath(rel) && phases.brainstorm.status === "in_progress" && isDraftOrMissing(boundSpec)) {
+      if (tool === "write" && isSpecPath(rel, snap.specDirs) && phases.brainstorm.status === "in_progress" && isDraftOrMissing(boundSpec)) {
         if (await rebind(rel)) onBoundSpecWrite(tool, rel, event);
         flush();
         return undefined;
       }
-      if (tool === "edit" && isSpecPath(rel)) {
-        onOtherSpecEdit(rel, event);
+      if (tool === "edit" && isSpecPath(rel, snap.specDirs)) {
+        onOtherSpecEdit(rel, event, snap.specDirs);
         flush();
       }
       return undefined;
@@ -616,7 +620,7 @@
 
     // Defined in block 2.
     let onBoundSpecWrite: (tool: "write" | "edit", rel: string, event: { input: unknown; content: unknown[] }) => unknown;
-    let onOtherSpecEdit: (rel: string, event: { input: unknown }) => void;
+    let onOtherSpecEdit: (rel: string, event: { input: unknown }, specDirs: string[]) => void;
 
     let amendmentOpen = false;
     let lastPlanTasks: { status: string }[] | undefined;
@@ -728,7 +732,7 @@
       if (!record || !toplevel || liveShipEvent(record.events)) return;
       record.status = "shipped";
       record.shipped_at = deps.now();
-      const out = await computeJjDiff({ jj: deps.jj ?? realJj, cwd: toplevel, spec: record.spec, dir: currentDir, buckets: snap.telemetry.buckets });
+      const out = await computeJjDiff({ jj: deps.jj ?? realJj, cwd: toplevel, spec: record.spec, dir: currentDir, buckets: snap.telemetry.buckets, planDirs: snap.planDirs });
       if (out.warning) warn(out.warning);
       record.derived.modified_files = out.modified_files;
       record.derived.diff = out.diff;
@@ -743,7 +747,7 @@
         const rawPath = (event.input as { path?: unknown }).path;
         if (typeof rawPath === "string" && phases.brainstorm.status === "in_progress") {
           const loc = await locate(ctx, rawPath);
-          if (loc && isSpecPath(loc.rel)) {
+          if (loc && isSpecPath(loc.rel, snap.specDirs)) {
             const recRel = recordPathFor(snap.telemetry.dir, loc.rel);
             const existing = deps.fs.readFile(join(loc.toplevel, recRel));
             const parsed = existing ? parseRecord(existing) : undefined;
@@ -832,8 +836,8 @@
       return undefined;
     };
 
-    onOtherSpecEdit = (rel, event) => {
-      if (!record || !boundSpec || !isSafeSpecLink(rel)) return;
+    onOtherSpecEdit = (rel, event, specDirs) => {
+      if (!record || !boundSpec || !isSafeSpecLink(rel, specDirs)) return;
       if (!isSupersededByBanner(insertedText(event.input), boundSpec)) return;
       predecessorLinks.add(rel);
       refreshLinks();

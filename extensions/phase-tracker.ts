@@ -17,6 +17,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import {
   mainLoopModel,
+  planDirsFor,
   resolveClosureReview,
   resolveEscalationLoop,
   resolveFlowGuards,
@@ -734,7 +735,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   const GauntletSettingParams = Type.Object({
-    key: StringEnum(["specCouncil", "closureReview", "escalationLoop"] as const, {
+    key: StringEnum(["specCouncil", "closureReview", "escalationLoop", "flowGuards"] as const, {
       description: "Which gauntlet setting to resolve (merged repo-over-preset).",
     }),
   });
@@ -747,16 +748,19 @@ export default function (pi: ExtensionAPI) {
     executionMode: "sequential",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { gauntlet, errors } = loadGauntletSettings(ctx.cwd);
+      const fg = resolveFlowGuards(gauntlet);
       const payload =
         params.key === "specCouncil"
           ? { key: "specCouncil" as const, ...resolveSpecCouncil(gauntlet), errors }
           : params.key === "closureReview"
             ? { key: "closureReview" as const, ...resolveClosureReview(gauntlet), errors }
-            : {
-                key: "escalationLoop" as const,
-                ...resolveEscalationLoop(gauntlet, mainLoopModel(ctx.model, ctx.thinkingLevel)),
-                errors,
-              };
+            : params.key === "flowGuards"
+              ? { key: "flowGuards" as const, ...fg, planDirs: planDirsFor(fg.specDirs), errors }
+              : {
+                  key: "escalationLoop" as const,
+                  ...resolveEscalationLoop(gauntlet, mainLoopModel(ctx.model, ctx.thinkingLevel)),
+                  errors,
+                };
       return {
         content: [{ type: "text", text: "```json\n" + JSON.stringify(payload, null, 2) + "\n```" }],
         details: payload,

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "gauntlet-spec-index.mjs");
+const EMPTY_AGENT = mkdtempSync(join(tmpdir(), "gsi-empty-agent-"));
 const DRAFT = "# CONTEXT DRAFT - NOT A SPEC - fully replaced at spec-writing";
 const HEADER = ["score", "path", "service", "title", "status", "shipped_at", "state", "files", "snippet"];
 const DOCS_HEADER = ["score", "path", "title", "snippet"];
@@ -68,7 +69,7 @@ const repo = () => {
 };
 
 const run = (cwd, args) => {
-  const r = spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: "utf8" });
+  const r = spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: "utf8", env: { ...process.env, PI_CODING_AGENT_DIR: EMPTY_AGENT } });
   const lines = r.stdout.split("\n").filter(Boolean);
   return { status: r.status, stderr: r.stderr, stdout: r.stdout, header: lines[0]?.split("\t"), rows: lines.slice(1).map((l) => l.split("\t")) };
 };
@@ -81,6 +82,45 @@ const withDb = (root, fn) => {
     database.close();
   }
 };
+
+test("S1: a repo with only docs/specs/ is indexed under the default dirs", (t) => {
+  const root = gitRepo(); t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, "docs/specs/a.md", "# Alpha zephyr widget\n\n**Goal:** rank the widget.\n");
+  for (const n of ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]) write(root, `docs/specs/filler-${n}.md`, filler(n));
+  commit(root);
+  const r = run(root, ["--query", "zephyr widget"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r), ["docs/specs/a.md"]);
+});
+
+test("S2: repo flowGuards.specDirs replaces the defaults for the specs corpus", (t) => {
+  const root = gitRepo(); t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, ".pi/settings.json", JSON.stringify({ piGauntlet: { flowGuards: { specDirs: ["design/specs"] } } }));
+  write(root, "design/specs/a.md", "# Alpha zephyr widget\n\n**Goal:** rank the widget.\n");
+  write(root, "doc/specs/decoy.md", "# zephyr widget decoy\n");
+  write(root, "docs/specs/decoy2.md", "# zephyr widget decoy two\n");
+  for (const n of ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]) write(root, `design/specs/filler-${n}.md`, filler(n));
+  commit(root);
+  const r = run(root, ["--query", "zephyr widget"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r), ["design/specs/a.md"]);
+});
+
+test("S3: docs corpus excludes configured spec and plan dirs by literal path components, including glob metacharacters", (t) => {
+  const root = gitRepo(); t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(root, ".pi/settings.json", JSON.stringify({ piGauntlet: { flowGuards: { specDirs: ["docs/[draft]/specs"] } } }));
+  write(root, "docs/[draft]/specs/s.md", decoy);
+  write(root, "docs/[draft]/plans/p.md", decoy);
+  write(root, "docs/guide.md", "# Guide\n\n## Configuring the ptarmigan gannet\n\nprose\n");
+  for (let n = 1; n <= 4; n++) write(root, `docs/filler-${n}.md`, docFiller(n));
+  commit(root);
+  const r = run(root, ["--corpus", "docs", "--query", "ptarmigan gannet"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r), ["docs/guide.md"]);
+  const specs = run(root, ["--query", "ptarmigan gannet"]);
+  assert.equal(specs.status, 0, specs.stderr);
+  assert.ok(withDb(root, (db) => db.prepare("SELECT path FROM specs").all().map((x) => x.path)).includes("docs/[draft]/specs/s.md"));
+});
 
 test("1: corpus boundary, ordering, draft skip, git status clean, exclude written once", (t) => {
   const root = repo();

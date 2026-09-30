@@ -17,13 +17,14 @@ DRY. YAGNI. TDD. Frequent commits.
 
 Before drafting the plan, check `phase_tracker({ action: "status" })`. If `plan` is already `in_progress` (a flow restored by `/skill:gauntlet-resume` arrives this way), do **not** call `start` again - a repeat `start` on the in_progress phase resets its guard ledger. Otherwise call `phase_tracker({ action: "start", phase: "plan" })`.
 
-**Input:** an approved spec in `<project>/doc/specs/<filename>.md` — produced by `/skill:brainstorming` in this session, or restored from another session by `/skill:gauntlet-resume`. Those two are the only entry points.
+**Input:** an approved spec in a resolved spec dir from `gauntlet_setting({ key: "flowGuards" })` - produced by `/skill:brainstorming` in this session, or restored from another session by `/skill:gauntlet-resume`. Those two are the only entry points.
 
-**Save plans to:** the sibling `doc/plans/` directory next to the spec. The plan filename matches the spec filename exactly — same date, same ticket ID (if any), same topic slug, no `-design` suffix. The plan path is absolute under the worktree (`<abs worktree path>/doc/plans/<filename>.md`, the path reported by `using-git-worktrees`), and `plan_check({ planPath })` receives that absolute path - the tool roots its checks at the plan's own checkout, not at the session cwd.
+**Save plans to:** the sibling `plans/` directory next to the spec's resolved dir (`doc/specs` -> `doc/plans`, `docs/specs` -> `docs/plans`). The plan filename matches the spec filename exactly - same date, same ticket ID (if any), same topic slug, no `-design` suffix. Use the absolute plan path under the worktree (`<abs worktree path>/<sibling plans dir>/<filename>.md`, using the path reported by `using-git-worktrees`), and `plan_check({ planPath })` receives that absolute path - the tool roots its checks at the plan's own checkout, not at the session cwd.
 
 | Spec path | Plan path |
 |---|---|
 | `doc/specs/2025-05-26-foo.md` | `doc/plans/2025-05-26-foo.md` |
+| `docs/specs/2025-05-26-foo.md` | `docs/plans/2025-05-26-foo.md` |
 | `doc/specs/2025-05-26-PROJ-1234-foo.md` | `doc/plans/2025-05-26-PROJ-1234-foo.md` |
 | `<service>/doc/specs/<name>.md` | `<service>/doc/plans/<name>.md` |
 
@@ -32,7 +33,7 @@ If no spec exists, send the work back to `/skill:brainstorming`. Do not invent a
 ## Boundaries
 
 - Read code and docs: yes
-- Write the plan to the sibling `doc/plans/` of the spec: yes
+- Write the plan to the sibling `plans/` dir of the spec: yes
 - Edit or create any other files: no
 - Write implementation code: never inside this skill. After Self-Review + `phase_tracker` complete, auto-invoke `/skill:subagent-driven-development` to execute.
 - Land the plan on `main`: no — the plan commit goes on the worktree branch (same branch as the spec)

@@ -2,13 +2,13 @@
 // Seal a gauntlet telemetry record at finish: stamp shipped, compute the ship diff,
 // re-derive, and commit the record once as `telemetry: <spec>`. The recorder never
 // commits; this is the only place the record enters git history.
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
-import { mergeGauntlet, resolveTelemetry } from "../../extensions/lib/gauntlet-settings.ts";
-import { isSpecPath, recordPathFor, repoRelativeToolPath } from "../../extensions/lib/telemetry-paths.ts";
+import { mergeGauntlet, planDirsFor, resolveFlowGuards, resolveTelemetry } from "../../extensions/lib/gauntlet-settings.ts";
+import { recordPathFor, repoRelativeToolPath, toPosix } from "../../extensions/lib/telemetry-paths.ts";
 import { computeGitDiff } from "../../extensions/lib/telemetry-diff.ts";
 import { derive, parseRecord, serializeRecord } from "../../extensions/lib/telemetry-record.ts";
 
@@ -66,11 +66,23 @@ function readLayer(file) {
 
 // Resolves piGauntlet.telemetry from the same two layers the recorder reads
 // (gauntlet-settings-loader.ts), without the pi import.
-function telemetrySettings(root) {
+function settings(root) {
   const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
   const preset = readLayer(join(agentDir, "settings.json"));
   const repo = readLayer(join(root, ".pi", "settings.json"));
-  return resolveTelemetry(mergeGauntlet(preset?.piGauntlet, repo?.piGauntlet));
+  const merged = mergeGauntlet(preset?.piGauntlet, repo?.piGauntlet);
+  return { telemetry: resolveTelemetry(merged), planDirs: planDirsFor(resolveFlowGuards(merged).specDirs) };
+}
+
+function walkRecords(absDir) {
+  if (!existsSync(absDir)) return [];
+  const out = [];
+  for (const e of readdirSync(absDir, { withFileTypes: true })) {
+    const p = join(absDir, e.name);
+    if (e.isDirectory()) out.push(...walkRecords(p));
+    else if (e.isFile() && e.name.endsWith(".yaml")) out.push(p);
+  }
+  return out;
 }
 
 const isoNow = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -93,7 +105,7 @@ async function seal(root, rec, o) {
     parsed.status = "shipped";
     parsed.shipped_at = now;
     parsed.events.push({ ts: now, session: parsed.sessions.at(-1) ?? "seal", phase: "ship", kind: "ship", option: o.option });
-    const out = await computeGitDiff({ git: gitRunner, cwd: root, spec: parsed.spec, dir: o.dir, buckets: o.buckets, base: o.base });
+    const out = await computeGitDiff({ git: gitRunner, cwd: root, spec: parsed.spec, dir: o.dir, buckets: o.buckets, base: o.base, planDirs: o.planDirs });
     if (out.warning) parsed.events.push({ ts: now, session: parsed.sessions.at(-1) ?? "seal", phase: "ship", kind: "warning", message: out.warning });
     parsed.derived.diff = out.diff;
     parsed.derived.modified_files = out.modified_files;
@@ -125,18 +137,23 @@ async function main() {
     // root is git's realpath'd toplevel; an absolute --spec may spell a symlinked prefix.
     const specAbs = isAbsolute(opts.spec) && existsSync(opts.spec) ? realpathSync(opts.spec) : opts.spec;
     rel = repoRelativeToolPath(root, root, specAbs);
-    if (!rel || !isSpecPath(rel)) usage();
+    if (!rel) usage();
   }
-  const telemetry = telemetrySettings(root);
+  const { telemetry, planDirs } = settings(root);
   if (telemetry.warning) process.stderr.write(`warning: ${telemetry.warning}\n`);
   if (!telemetry.enabled) return console.log("telemetry disabled");
   const dir = override?.dir ?? telemetry.dir;
   if (!git(root, ["rev-parse", "--verify", "-q", `${opts.base}^{commit}`]).ok) fail(1, `no base ref ${opts.base}`);
-  const o = { option: opts.option, base: opts.base, dir, buckets: telemetry.buckets };
+  const o = { option: opts.option, base: opts.base, dir, buckets: telemetry.buckets, planDirs };
   if (opts.spec) return seal(root, recordPathFor(dir, rel), o);
-  const diff = git(root, ["diff", "--name-only", `${opts.base}...HEAD`]);
+  const diff = git(root, ["diff", "--no-renames", "--name-only", `${opts.base}...HEAD`]);
   if (!diff.ok) fail(1, `git diff failed: ${diff.stderr}`);
-  const records = diff.stdout.split("\n").filter((f) => f && isSpecPath(f)).map((f) => recordPathFor(dir, f)).filter((rec) => existsSync(join(root, rec)));
+  const changed = new Set(diff.stdout.split("\n").filter(Boolean));
+  const records = walkRecords(join(root, dir)).filter((abs) => {
+    const parsed = parseRecord(readFileSync(abs, "utf8"));
+    if (!parsed) process.stderr.write(`warning: unparseable record ${toPosix(relative(root, abs))}\n`);
+    return parsed && changed.has(parsed.spec);
+  }).map((abs) => toPosix(relative(root, abs))).sort();
   if (records.length === 0) return console.log("no telemetry run");
   for (const rec of records) await seal(root, rec, o);
 }

@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
   CONTEXT_DRAFT_MARKER,
   checkSubstep,
@@ -254,4 +257,15 @@ test("implementExemptDirs: adds each spec dir's sibling plans dir, deduped", () 
 
 test("nextGauntletEntered: skip preserves the marker (resume gesture)", () => {
   assert.equal(nextGauntletEntered(true, "skip", "skipped"), true);
+});
+
+test("module order: telemetry-paths and phase-tracker-helpers initialize in either import order", () => {
+  const lib = dirname(fileURLToPath(import.meta.url));
+  const loader = join(lib, "..", "test-support", "pi-stubs.mjs");
+  const paths = join(lib, "telemetry-paths.ts");
+  const helpers = join(lib, "phase-tracker-helpers.ts");
+  for (const [a, b] of [[paths, helpers], [helpers, paths]]) {
+    const r = spawnSync(process.execPath, ["--experimental-loader", loader, "--input-type=module", "-e", `await import(${JSON.stringify(a)}); await import(${JSON.stringify(b)});`], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  }
 });

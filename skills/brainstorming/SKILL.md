@@ -17,9 +17,9 @@ Identify the target project → set up an isolated worktree → understand curre
 
 Do **not** implement until the design is presented and approved, regardless of simplicity. Implementation-heavy requests define spec scope; they do not lift this gate.
 
-You **may** read code/docs, run the existing system to observe current behavior, write under `doc/specs/`, and `edit` a predecessor spec there to add a [supersession banner](reference/superseding.md).
+You **may** read code/docs, run the existing system to observe current behavior, write under a resolved spec dir (`gauntlet_setting({ key: "flowGuards" })` -> `specDirs`), and `edit` a predecessor spec there to add a [supersession banner](reference/superseding.md).
 
-You may **not** write outside `doc/specs/`; build, deploy, validate, or exercise the proposed change; run implementation skills; commit the spec on `main`; or start `/skill:writing-plans`.
+You may **not** write outside the resolved spec dirs; build, deploy, validate, or exercise the proposed change; run implementation skills; commit the spec on `main`; or start `/skill:writing-plans`.
 
 The line: current-system observation is research; exercising the proposed change waits for approval.
 
@@ -63,7 +63,7 @@ Detection order: (1) infer from ticket labels, description, or paths; (2) use th
 The spec is the first commit in a dedicated worktree, never a separate commit on `main`.
 
 1. Invoke `/skill:using-git-worktrees`; use `.worktrees/` or the project-native location.
-2. Carry its `Worktree ready at <full-path>` value: spec path `<full-path>/doc/specs/<filename>.md`; every dispatch uses that `cwd`; git uses `git -C <full-path>`. Keep the process cwd unchanged.
+2. Carry its `Worktree ready at <full-path>` value: spec path `<full-path>/<spec dir>/<filename>.md`; every dispatch uses that `cwd`; git uses `git -C <full-path>`. Keep the process cwd unchanged.
 3. Write, review, and commit there.
 
 Spec, plan, and implementation share this worktree. The spec and its telemetry record (`<telemetry.dir>/<spec path with .md -> .yaml>`, default `.pi/gauntlet/telemetry/doc/specs/<spec>.yaml`) are deliverables and ship in the squash; only the plan is stripped. `/skill:finishing-a-development-branch` strips the plan, then seals and commits the record before landing. Explicit trivial one-off edits outside this flow need no worktree.
@@ -146,7 +146,7 @@ Shared schemas, contracts, and invariants require a spec. If work is mechanical 
 
 ## Filename Convention
 
-Write under the routed `doc/specs/`: ticketed `YYYY-MM-DD-<ticket-id>-<topic>.md`, otherwise `YYYY-MM-DD-<topic>.md`. Use a filename-safe tracker slug (`E-12345`, `gh-123`), but native references in plan headers and commits. `<topic>` is 3-6 kebab-case words without `-design` or another suffix.
+Write under the routed spec dir: pick the routing prose's dir (overrides file, `AGENTS.md`) when it is one of the resolved dirs, else the one resolved dir from `gauntlet_setting({ key: "flowGuards" })` that already exists in the repo, else the first resolved dir (`doc/specs` under the default). Name ticketed files `YYYY-MM-DD-<ticket-id>-<topic>.md`, otherwise `YYYY-MM-DD-<topic>.md`. Use a filename-safe tracker slug (`E-12345`, `gh-123`), but native references in plan headers and commits. `<topic>` is 3-6 kebab-case words without `-design` or another suffix.
 
 Mint the slug once during gather and reuse it. If questionary invalidates it, write to the new path and delete the uncommitted draft.
 
@@ -293,7 +293,7 @@ One question at a time, YAGNI, 2-3 approaches, two design rounds, clarify freely
 
 ## Red Flags — STOP
 
-- Writes outside `doc/specs/` ([owner](#hard-constraint)).
+- Writes outside the resolved spec dirs ([owner](#hard-constraint)).
 - Draft overwrite without the same-turn full read, or overwrite via `edit` ([owner](#spec-self-review-before-user-review-gate)).
 - Dispatch while line 1 is the context-draft marker ([owner](#spec-self-review-before-user-review-gate)).
 - Inline scope or ambiguity checks ([owner](#spec-council-optional)).

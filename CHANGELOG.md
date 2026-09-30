@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `flowGuards.specDirs` defaults to `["doc/specs", "docs/specs"]` and now governs telemetry spec/plan classification, the seal's plan exclusion, and the spec index; `gauntlet-telemetry-seal` selects records by their `spec:` field; `gauntlet-spec-index` ships as an esbuild bundle from `src/bins/`; `gauntlet_setting` gains the `flowGuards` key.
+
 ## v6.0.0 - 2026-09-30
 
 ### Changed

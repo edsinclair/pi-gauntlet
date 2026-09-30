@@ -5,6 +5,7 @@ import { JJ_MAINLINE, aggregateNumstat, computeGitDiff, computeJjDiff, type RunR
 
 const ok = (stdout: string): RunResult => ({ code: 0, stdout, stderr: "" });
 const DIR = ".pi/gauntlet/telemetry";
+const PLAN_DIRS = ["doc/plans", "docs/plans"];
 
 test("aggregateNumstat sums per bucket over the given file set; binary rows count 0 lines", () => {
   const numstat = ["10\t2\textensions/telemetry.ts", "5\t0\textensions/lib/telemetry-paths.test.ts", "-\t-\timg.png", "3\t3\tdoc/specs/a.md", "1\t1\t{old => new}/x.ts"].join("\n");
@@ -20,12 +21,12 @@ test("computeGitDiff: merge-base, name-only minus spec/plan/dir, numstat buckets
   const git = (args: string[]) => {
     calls.push(args);
     if (args[0] === "merge-base") return ok("abc123\n");
-    if (args[0] === "diff" && args.includes("--name-only")) return ok("extensions/telemetry.ts\nextensions/telemetry.test.ts\ndoc/specs/a.md\ndoc/plans/a.md\n.pi/gauntlet/telemetry/doc/specs/a.yaml\nREADME.md\n");
+    if (args[0] === "diff" && args.includes("--name-only")) return ok("extensions/telemetry.ts\nextensions/telemetry.test.ts\ndoc/specs/a.md\ndoc/plans/a.md\ndocs/plans/q.md\n.pi/gauntlet/telemetry/doc/specs/a.yaml\nREADME.md\n");
     if (args[0] === "diff" && args.includes("--numstat")) return ok("100\t5\textensions/telemetry.ts\n40\t0\textensions/telemetry.test.ts\n9\t9\tdoc/specs/a.md\n2\t1\tREADME.md\n");
     if (args[0] === "rev-list") return ok("9\n");
     return { code: 1, stdout: "", stderr: `unexpected ${args.join(" ")}` };
   };
-  const out = await computeGitDiff({ git, cwd: "/repo", spec: "doc/specs/a.md", dir: DIR, buckets: DEFAULT_TELEMETRY_BUCKETS, base: "main" });
+  const out = await computeGitDiff({ git, cwd: "/repo", spec: "doc/specs/a.md", dir: DIR, planDirs: PLAN_DIRS, buckets: DEFAULT_TELEMETRY_BUCKETS, base: "main" });
   assert.deepEqual(out.modified_files, ["README.md", "extensions/telemetry.test.ts", "extensions/telemetry.ts"]);
   assert.deepEqual(out.diff, { base: "abc123", commits: 9, buckets: { code: { files: 1, insertions: 100, deletions: 5 }, test: { files: 1, insertions: 40, deletions: 0 }, docs: { files: 1, insertions: 2, deletions: 1 } } });
   assert.equal(out.warning, undefined);
@@ -33,8 +34,20 @@ test("computeGitDiff: merge-base, name-only minus spec/plan/dir, numstat buckets
   assert.deepEqual(calls.at(-1), ["rev-list", "--count", "--invert-grep", "--grep=^telemetry: ", "abc123..HEAD"]);
 });
 
+test("computeGitDiff: custom plan dir excludes only configured plans", async () => {
+  const git = (args: string[]) => {
+    if (args[0] === "merge-base") return ok("abc123\n");
+    if (args.includes("--name-only")) return ok("design/plans/x.md\ndoc/plans/x.md\n");
+    if (args.includes("--numstat")) return ok("1\t0\tdesign/plans/x.md\n1\t0\tdoc/plans/x.md\n");
+    if (args[0] === "rev-list") return ok("1\n");
+    return { code: 1, stdout: "", stderr: `unexpected ${args.join(" ")}` };
+  };
+  const out = await computeGitDiff({ git, cwd: "/repo", spec: "design/specs/a.md", dir: DIR, planDirs: ["design/plans"], buckets: DEFAULT_TELEMETRY_BUCKETS, base: "main" });
+  assert.deepEqual(out.modified_files, ["doc/plans/x.md"]);
+});
+
 test("computeGitDiff: merge-base failure -> warning, both fields absent", async () => {
-  const out = await computeGitDiff({ git: () => ({ code: 128, stdout: "", stderr: "fatal: no merge base\nmore" }), cwd: "/repo", spec: "doc/specs/a.md", dir: DIR, buckets: DEFAULT_TELEMETRY_BUCKETS, base: "main" });
+  const out = await computeGitDiff({ git: () => ({ code: 128, stdout: "", stderr: "fatal: no merge base\nmore" }), cwd: "/repo", spec: "doc/specs/a.md", dir: DIR, planDirs: PLAN_DIRS, buckets: DEFAULT_TELEMETRY_BUCKETS, base: "main" });
   assert.deepEqual(out, { warning: "diff omitted: merge-base failed: fatal: no merge base" });
 });
 
@@ -55,6 +68,20 @@ const JJ_PATCH = [
   "+++ b/test/a.test.ts",
   "@@ -0,0 +1,5 @@",
   ...Array.from({ length: 5 }, (_, i) => `+t ${i}`),
+  "diff --git a/doc/plans/p.md b/doc/plans/p.md",
+  "new file mode 100644",
+  "index 0000000..4444444",
+  "--- /dev/null",
+  "+++ b/doc/plans/p.md",
+  "@@ -0,0 +1 @@",
+  "+plan",
+  "diff --git a/docs/plans/x.md b/docs/plans/x.md",
+  "new file mode 100644",
+  "index 0000000..4444444",
+  "--- /dev/null",
+  "+++ b/docs/plans/x.md",
+  "@@ -0,0 +1 @@",
+  "+plan",
   "",
 ].join("\n");
 
@@ -73,7 +100,7 @@ const jjStub = (over?: (args: string[]) => RunResult | undefined) => {
 };
 const runJj = (over?: (args: string[]) => RunResult | undefined) => {
   const s = jjStub(over);
-  return computeJjDiff({ jj: s.jj, cwd: "/ws", spec: "doc/specs/a.md", dir: DIR, buckets: DEFAULT_TELEMETRY_BUCKETS }).then((out) => ({ out, calls: s.calls }));
+  return computeJjDiff({ jj: s.jj, cwd: "/ws", spec: "doc/specs/a.md", dir: DIR, planDirs: PLAN_DIRS, buckets: DEFAULT_TELEMETRY_BUCKETS }).then((out) => ({ out, calls: s.calls }));
 };
 const isBaseLog = (args: string[]) => args.includes("log") && !args.includes("--count");
 
@@ -86,6 +113,27 @@ test("computeJjDiff: pinned flags, mainline revset, telemetry-only revisions exc
   assert.ok(calls.every((a) => a.includes("--color=never")));
   assert.deepEqual(calls[1].slice(0, 4), ["--color=never", "--config", "diff.git.show-path-prefix=true", "diff"]);
   assert.ok(calls[0].some((a) => a.includes(`fork_point(${JJ_MAINLINE} | @) ~ root() & ::${JJ_MAINLINE}`)));
+});
+
+test("computeJjDiff: custom plan dir excludes only configured plans", async () => {
+  const patch = [
+    "diff --git a/design/plans/x.md b/design/plans/x.md",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/design/plans/x.md",
+    "@@ -0,0 +1 @@",
+    "+plan",
+    "diff --git a/doc/plans/x.md b/doc/plans/x.md",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/doc/plans/x.md",
+    "@@ -0,0 +1 @@",
+    "+other plan",
+    "",
+  ].join("\n");
+  const { jj } = jjStub((args) => (args.includes("diff") ? ok(patch) : undefined));
+  const out = await computeJjDiff({ jj, cwd: "/ws", spec: "design/specs/a.md", dir: DIR, planDirs: ["design/plans"], buckets: DEFAULT_TELEMETRY_BUCKETS });
+  assert.deepEqual(out.modified_files, ["doc/plans/x.md"]);
 });
 
 test("computeJjDiff: empty mainline -> jj-named warning", async () => {

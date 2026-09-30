@@ -5,6 +5,7 @@
  */
 
 import { resolve } from "node:path";
+import { planDirsFor } from "./gauntlet-settings.ts";
 
 export const CONTEXT_DRAFT_MARKER = "# CONTEXT DRAFT - NOT A SPEC - fully replaced at spec-writing";
 
@@ -169,10 +170,10 @@ export function implementWriteGuardApplies(
 export function implementExemptDirs(specDirs: string[]): string[] {
   const dirs = new Set<string>();
   for (const dir of specDirs) {
-    const parts = dir.split("/").filter((c) => c.length > 0);
-    if (parts.length === 0) continue;
-    dirs.add(parts.join("/"));
-    dirs.add([...parts.slice(0, -1), "plans"].join("/"));
+    const spec = dir.split("/").filter((c) => c.length > 0).join("/");
+    if (!spec) continue;
+    dirs.add(spec);
+    for (const plan of planDirsFor([spec])) dirs.add(plan);
   }
   return [...dirs];
 }

@@ -7,6 +7,7 @@ import {
   resolveEscalationLoop,
   mainLoopModel,
   resolveFlowGuards,
+  planDirsFor,
   resolveVerifyBeforeShip,
   resolveTelemetry,
   DEFAULT_TELEMETRY_DIR,
@@ -135,11 +136,20 @@ test("closureReview: maxFixRounds default 3, <0 -> 0, non-int -> 3", () => {
   assert.equal(resolveClosureReview({ closureReview: { maxFixRounds: 1.5 } }).maxFixRounds, 3);
 });
 
-test("flowGuards: defaults + overrides", () => {
-  assert.deepEqual(resolveFlowGuards({}), { enforce: true, specDirs: ["doc/specs"] });
+test("flowGuards: defaults + overrides + normalization", () => {
+  assert.deepEqual(resolveFlowGuards({}), { enforce: true, specDirs: ["doc/specs", "docs/specs"] });
   assert.equal(resolveFlowGuards({ flowGuards: { enforce: false } }).enforce, false);
   assert.deepEqual(resolveFlowGuards({ flowGuards: { specDirs: ["a/b"] } }).specDirs, ["a/b"]);
-  assert.deepEqual(resolveFlowGuards({ flowGuards: { specDirs: [] } }).specDirs, ["doc/specs"]);
+  assert.deepEqual(resolveFlowGuards({ flowGuards: { specDirs: [] } }).specDirs, ["doc/specs", "docs/specs"]);
+  assert.deepEqual(resolveFlowGuards({ flowGuards: { specDirs: "x" } }).specDirs, ["doc/specs", "docs/specs"]);
+  assert.deepEqual(resolveFlowGuards({ flowGuards: { specDirs: ["docs/specs/", "./design/specs"] } }).specDirs, ["docs/specs", "design/specs"]);
+});
+
+test("planDirsFor: sibling plans dir per spec dir, deduplicated", () => {
+  assert.deepEqual(planDirsFor(["doc/specs", "design/specs"]), ["doc/plans", "design/plans"]);
+  assert.deepEqual(planDirsFor(["doc/specs", "docs/specs"]), ["doc/plans", "docs/plans"]);
+  assert.deepEqual(planDirsFor(["specs"]), ["plans"]);
+  assert.deepEqual(planDirsFor(["a/plans", "a/specs"]), ["a/plans"]);
 });
 
 test("settingsErrorWarning: includes prefix and joined errors", () => {

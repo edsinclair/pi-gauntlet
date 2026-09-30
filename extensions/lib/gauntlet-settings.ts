@@ -119,15 +119,31 @@ export interface FlowGuardsResolved {
   specDirs: string[];
 }
 
+export const DEFAULT_SPEC_DIRS = ["doc/specs", "docs/specs"];
+
+// Strip a leading ./ and trailing slashes so "docs/specs/" and "./docs/specs" match the same paths.
+const normalizeDir = (d: string): string => d.trim().replace(/^\.\//, "").replace(/\/+$/, "");
+
 export function resolveFlowGuards(g: PiGauntlet): FlowGuardsResolved {
   const fg = g.flowGuards;
   const enforce = fg?.enforce !== false;
   const rawDirs = fg?.specDirs;
   const specDirs =
     Array.isArray(rawDirs) && rawDirs.length > 0 && rawDirs.every(nonEmptyString)
-      ? (rawDirs as string[]).map((d) => d.trim())
-      : ["doc/specs"];
+      ? (rawDirs as string[]).map(normalizeDir)
+      : [...DEFAULT_SPEC_DIRS];
   return { enforce, specDirs };
+}
+
+// Each spec dir's sibling `plans` dir (doc/specs -> doc/plans); plans live there per writing-plans.
+export function planDirsFor(specDirs: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const dir of specDirs) {
+    const parts = dir.split("/").filter((c) => c.length > 0);
+    if (parts.length === 0) continue;
+    out.add([...parts.slice(0, -1), "plans"].join("/"));
+  }
+  return [...out];
 }
 
 export interface VerifyBeforeShipResolved {

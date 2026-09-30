@@ -4,7 +4,7 @@
   import { join } from "node:path";
   import { after, test } from "node:test";
   import registerTelemetry, { realFs, replayBranch, type Deps, type GitResult } from "./telemetry.ts";
-  import { DEFAULT_TELEMETRY_BUCKETS } from "./lib/gauntlet-settings.ts";
+  import { DEFAULT_TELEMETRY_BUCKETS, planDirsFor, resolveFlowGuards } from "./lib/gauntlet-settings.ts";
   import { emptyAccumulators, parseRecord, serializeRecord } from "./lib/telemetry-record.ts";
   import { guardReason } from "./lib/telemetry-ship.ts";
 
@@ -24,6 +24,7 @@
     const root = mkdtempSync(join(tmpdir(), "telemetry-test-"));
     tempDirs.push(root);
     mkdirSync(join(root, "doc/specs"), { recursive: true });
+    mkdirSync(join(root, "docs/specs"), { recursive: true });
     mkdirSync(join(root, "doc/plans"), { recursive: true });
     mkdirSync(join(root, ".worktrees/x/doc/specs"), { recursive: true });
     const handlers = new Map<string, Handler[]>();
@@ -31,6 +32,7 @@
     const gitCwds: string[] = [];
     const jjCalls: string[][] = [];
     const readFileCalls: string[] = [];
+    const specDirs = resolveFlowGuards({}).specDirs;
     let clock = Date.parse("2026-09-17T10:00:00Z");
     const deps: Deps = {
       fs: { ...realFs, readFile: (p) => { readFileCalls.push(p); return realFs.readFile(p); } },
@@ -56,7 +58,7 @@
         if (args[0] === "ls-files") return { code: 0, stdout: "", stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       },
-      settings: () => ({ telemetry: { enabled: o.enabled ?? true, dir: o.telemetryDir ?? ".pi/gauntlet/telemetry", buckets: DEFAULT_TELEMETRY_BUCKETS, warning: o.telemetryWarning }, errors: [], agentOverrides: { implementer: { model: "p/x" } }, versions: { pi: "0.85.1" } }),
+      settings: () => ({ specDirs, planDirs: planDirsFor(specDirs), telemetry: { enabled: o.enabled ?? true, dir: o.telemetryDir ?? ".pi/gauntlet/telemetry", buckets: DEFAULT_TELEMETRY_BUCKETS, warning: o.telemetryWarning }, errors: [], agentOverrides: { implementer: { model: "p/x" } }, versions: { pi: "0.85.1" } }),
       // A plain jj workspace: `jj root` answers the temp root while git rev-parse fails.
       jj: async (args, cwd) => {
         jjCalls.push(args);
@@ -180,6 +182,19 @@
     assert.equal(readFileSync(h.excludeFile(), "utf8"), ".pi/gauntlet/telemetry/\n", "exclude line is written once after rebind");
   });
 
+  test("a docs/specs write binds under the default dirs and the record lands under telemetry.dir/docs/specs", async () => {
+    const h = harness();
+    await h.phaseResult("start", P({ brainstorm: "in_progress" }));
+    assert.equal(existsSync(h.recordPath("docs/specs/x.md")), false);
+    await h.writeSpec("docs/specs/x.md");
+    assert.equal(h.recordPath("docs/specs/x.md"), join(h.root, ".pi/gauntlet/telemetry/docs/specs/x.yaml"));
+    assert.equal(h.readRecord("docs/specs/x.md").spec, "docs/specs/x.md");
+    await h.phaseResult("complete", P({ brainstorm: "complete" }));
+    const rec = h.readRecord("docs/specs/x.md");
+    assert.equal(rec.approved_at, rec.events.at(-1)!.ts);
+    assert.equal(h.gitWrites().length, 0);
+  });
+
   test("bind derives approved_at from a buffered brainstorm completion", async () => {
     const h = harness();
     await h.phaseResult("start", P({ brainstorm: "in_progress" }));
@@ -231,7 +246,7 @@
       { type: "message", message: { role: "toolResult", toolName: "write", toolCallId: "w1", isError: false } },
       { type: "message", message: { role: "toolResult", toolName: "write", toolCallId: "w2", isError: false } },
       { type: "message", message: { role: "toolResult", toolName: "write", toolCallId: "w3", isError: true } },
-    ]);
+    ], ["doc/specs", "docs/specs"]);
     assert.deepEqual(replay.phases, successfulPhases);
     assert.equal(replay.gauntletEntered, true);
     assert.equal(replay.planCheckSpec, "/repo/doc/specs/a.md");
@@ -246,7 +261,7 @@
     const unarmed = replayBranch([
       ...write("w1", "doc/specs/a.md"),
       { type: "message", message: { role: "toolResult", toolName: "plan_check", details: { status: "pass", specPath: "/repo/doc/specs/a.md" } } },
-    ]);
+    ], ["doc/specs", "docs/specs"]);
     assert.equal(unarmed.gauntletEntered, false);
     assert.equal(unarmed.lastSpecWrite, undefined);
     assert.equal(unarmed.planCheckSpec, undefined);
@@ -254,19 +269,29 @@
       ...write("w0", "doc/specs/before.md"),
       { type: "message", message: { role: "toolResult", toolName: "phase_tracker", details: { action: "start", phases: P({ brainstorm: "in_progress" }) } } },
       ...write("w1", "doc/specs/a.md", "edit"),
-    ]);
+    ], ["doc/specs", "docs/specs"]);
     assert.deepEqual([armed.gauntletEntered, armed.lastSpecWrite], [true, "doc/specs/a.md"]);
     const reset = replayBranch([
       { type: "message", message: { role: "toolResult", toolName: "phase_tracker", details: { action: "start", phases: P({ brainstorm: "in_progress" }) } } },
       ...write("w1", "doc/specs/a.md"),
       { type: "message", message: { role: "toolResult", toolName: "phase_tracker", details: { action: "reset", phases: P() } } },
-    ]);
+    ], ["doc/specs", "docs/specs"]);
     assert.deepEqual([reset.gauntletEntered, reset.lastSpecWrite], [false, undefined]);
     const resumed = replayBranch([
       { type: "message", message: { role: "toolResult", toolName: "phase_tracker", details: { action: "start", phases: P({ brainstorm: "in_progress" }) } } },
       { type: "message", message: { role: "toolResult", toolName: "phase_tracker", details: { action: "skip", phases: { ...P({ brainstorm: "skipped" }), brainstorm: { status: "skipped", reason: "resume: /repo/doc/specs/a.md" } } } } },
-    ]);
+    ], ["doc/specs", "docs/specs"]);
     assert.deepEqual([resumed.gauntletEntered, resumed.lastSpecWrite], [true, "/repo/doc/specs/a.md"]);
+  });
+
+  test("replayBranch honors a custom spec dir list", () => {
+    const branch = [
+      { type: "message", message: { role: "toolResult", toolName: "phase_tracker", details: { action: "start", phases: P({ brainstorm: "in_progress" }) } } },
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "w1", name: "write", arguments: { path: "design/specs/a.md" } }] } },
+      { type: "message", message: { role: "toolResult", toolName: "write", toolCallId: "w1", isError: false } },
+    ];
+    assert.equal(replayBranch(branch, ["design/specs"]).lastSpecWrite, "design/specs/a.md");
+    assert.equal(replayBranch(branch, ["doc/specs"]).lastSpecWrite, undefined);
   });
 
   test("session_start replay binds from plan_check details with no spec write, extends sessions, preserves run_id", async () => {

@@ -28,12 +28,23 @@ test("repoRelativeToolPath resolves like pi tools: relative to cwd, then repo-re
   assert.equal(repoRelativeToolPath("/repo", "/repo", "/elsewhere/x.md"), undefined);
 });
 
-test("isSpecPath / isPlanPath match **/doc/specs/*.md and **/doc/plans/*.md only", () => {
-  assert.ok(isSpecPath("doc/specs/a.md"));
-  assert.ok(isSpecPath("svc/doc/specs/a.md"));
-  assert.equal(isSpecPath("doc/specs/sub/a.md"), false);
-  assert.equal(isSpecPath("doc/plans/a.md"), false);
-  assert.ok(isPlanPath("doc/plans/a.md"));
+const DEFAULT_DIRS = ["doc/specs", "docs/specs"];
+const DEFAULT_PLANS = ["doc/plans", "docs/plans"];
+
+test("isSpecPath / isPlanPath: direct child .md of any configured dir, at root or under a service prefix", () => {
+  for (const p of ["doc/specs/x.md", "docs/specs/x.md", "svc/doc/specs/x.md", "svc/docs/specs/x.md"]) assert.ok(isSpecPath(p, DEFAULT_DIRS), p);
+  for (const p of ["docs/specs/sub/x.md", "docs/spec/x.md", "doc/plans/x.md", "xdocs/specs/x.md", "docs/specs/x.txt"]) assert.equal(isSpecPath(p, DEFAULT_DIRS), false, p);
+  for (const p of ["doc/plans/x.md", "docs/plans/x.md", "svc/doc/plans/x.md", "svc/docs/plans/x.md"]) assert.ok(isPlanPath(p, DEFAULT_PLANS), p);
+  for (const p of ["docs/plans/sub/x.md", "docs/plan/x.md", "doc/specs/x.md", "xdocs/plans/x.md", "docs/plans/x.txt"]) assert.equal(isPlanPath(p, DEFAULT_PLANS), false, p);
+  assert.ok(isPlanPath("design/plans/x.md", ["design/plans"]));
+  assert.equal(isPlanPath("doc/plans/x.md", ["design/plans"]), false);
+  assert.equal(isPlanPath("docs/plans/x.md", ["design/plans"]), false);
+  assert.ok(isSpecPath("design/specs/x.md", ["design/specs"]));
+  assert.equal(isSpecPath("doc/specs/x.md", ["design/specs"]), false);
+  assert.equal(isSpecPath("docs/specs/x.md", ["design/specs"]), false);
+  // regex metacharacters in a configured dir are matched literally
+  assert.ok(isSpecPath("docs/[draft]/specs/x.md", ["docs/[draft]/specs"]));
+  assert.equal(isSpecPath("docs/d/specs/x.md", ["docs/[draft]/specs"]), false);
 });
 
 test("planSpecHeader extracts the **Spec:** path", () => {

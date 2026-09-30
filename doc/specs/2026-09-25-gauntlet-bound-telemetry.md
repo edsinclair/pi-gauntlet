@@ -1,5 +1,7 @@
 # Gauntlet-bound telemetry: arm on flow entry, write-only until seal at finish
 
+> **Superseded by:** [doc/specs/2026-09-30-spec-dir-discovery.md](./2026-09-30-spec-dir-discovery.md) - spec/plan path classification (`isSpecPath`/`isPlanPath`), seal auto-selection, and the spec-index collect list
+
 **Goal:** The telemetry record exists only for runs that entered the gauntlet, lives as a git-excluded file in the worktree until `/skill:finishing-a-development-branch` seals and commits it once before landing, and is never read, checked, or stamped by `/skill:gatekeep-pr`.
 
 Ticket: none (free-text origin). Supersedes parts of `doc/specs/2026-09-17-gh-33-run-telemetry-recorder.md` (Binder, Record store, Flusher, Ship, Diff), the `bin/gauntlet-telemetry-salvage.mjs` section of `doc/specs/2026-09-18-gh-35-gauntlet-performance-telemetry-report.md`, and `doc/specs/2026-09-18-telemetry-record-deliverable.md` in full. `doc/specs/2026-09-24-gh-51-jj-telemetry-diff.md` stays in force for plain jj workspaces (see "jj workspaces").

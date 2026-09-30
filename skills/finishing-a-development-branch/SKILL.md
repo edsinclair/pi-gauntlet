@@ -185,11 +185,11 @@ Rows 1-2 run the Option 1/2 blocks; row 3 runs the Keep block and row 4 the Disc
 
 Run this on the feature branch before any landing path. The spec and its telemetry record (`<telemetry.dir>/<spec path with .md -> .yaml>`, default `.pi/gauntlet/telemetry/doc/specs/<spec>.yaml`) are deliverables and ship in the squash; only the plan is stripped. The record is an untracked, git-excluded file until this step commits it. `<bin>` is `<directory of this skill's SKILL.md>/../../bin`, resolved from the skill's `<location>` in the system prompt.
 
-Read the plan's `**Spec:**` header (repo-relative, backticks stripped) before the strip; that value is `--spec`.
+Read the plan's `**Spec:**` header (repo-relative, backticks stripped) before the strip; pass that value as `--spec`. Resolve the spec dirs with `gauntlet_setting({ key: "flowGuards" })` and use their sibling `plans` dirs for plan paths.
 
 ```bash
 # Plans are ephemeral - if one was committed on this branch, remove it before landing.
-PLAN_PATH=doc/plans/<plan-file>.md   # or <service>/doc/plans/<plan-file>.md
+PLAN_PATH=<sibling-plans-dir>/<plan-file>.md   # the sibling plans dir of the spec's dir
 if git -C "$WORKTREE" ls-files --error-unmatch "$PLAN_PATH" >/dev/null 2>&1; then
   git -C "$WORKTREE" rm "$PLAN_PATH" && git -C "$WORKTREE" commit -m "Remove ephemeral plan doc"
 fi

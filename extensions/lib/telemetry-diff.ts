@@ -27,7 +27,7 @@ export function aggregateNumstat(numstat: string, files: Set<string>, buckets: B
 export const JJ_MAINLINE = "coalesce(trunk() ~ root(), present(main), present(master))";
 const firstLine = (s: string): string => s.trim().split("\n")[0];
 
-export async function computeJjDiff(o: { jj: Runner; cwd: string; spec: string; dir: string; buckets: Buckets }): Promise<DiffOutcome> {
+export async function computeJjDiff(o: { jj: Runner; cwd: string; spec: string; dir: string; planDirs: readonly string[]; buckets: Buckets }): Promise<DiffOutcome> {
   const failed = (sub: string, r: RunResult): DiffOutcome => ({ warning: `diff omitted: jj ${sub} failed: ${firstLine(r.stderr) || "unknown error"}` });
   // Without the ::M guard an empty mainline resolves to @ and counts the full history.
   const baseR = await o.jj(["--color=never", "log", "-r", `fork_point(${JJ_MAINLINE} | @) ~ root() & ::${JJ_MAINLINE}`, "--no-graph", "-T", 'commit_id ++ "\\n"'], o.cwd);
@@ -44,17 +44,17 @@ export async function computeJjDiff(o: { jj: Runner; cwd: string; spec: string; 
   if (count.code !== 0) return failed("log", count);
   const n = count.stdout.trim();
   if (!/^\d+$/.test(n)) return { warning: `diff omitted: jj log --count unparseable: ${n}` };
-  const files = modifiedFilesFrom(rows.map((r) => r.path).join("\n"), o.spec, o.dir);
+  const files = modifiedFilesFrom(rows.map((r) => r.path).join("\n"), o.spec, o.dir, o.planDirs);
   const numstat = rows.map((r) => `${r.added}\t${r.removed}\t${r.path}`).join("\n");
   return { modified_files: files, diff: { base, commits: Number(n), buckets: aggregateNumstat(numstat, new Set(files), o.buckets) } };
 }
 
-export async function computeGitDiff(o: { git: Runner; cwd: string; spec: string; dir: string; buckets: Buckets; base: string }): Promise<DiffOutcome> {
+export async function computeGitDiff(o: { git: Runner; cwd: string; spec: string; dir: string; planDirs: readonly string[]; buckets: Buckets; base: string }): Promise<DiffOutcome> {
   const mb = await o.git(["merge-base", "HEAD", o.base], o.cwd);
   if (mb.code !== 0 || !mb.stdout.trim()) return { warning: `diff omitted: merge-base failed: ${firstLine(mb.stderr)}` };
   const base = mb.stdout.trim();
   const names = await o.git(["diff", "--name-only", `${base}...HEAD`], o.cwd);
-  const files = modifiedFilesFrom(names.stdout, o.spec, o.dir);
+  const files = modifiedFilesFrom(names.stdout, o.spec, o.dir, o.planDirs);
   const numstat = await o.git(["diff", "--numstat", `${base}...HEAD`], o.cwd);
   const count = await o.git(["rev-list", "--count", "--invert-grep", "--grep=^telemetry: ", `${base}..HEAD`], o.cwd);
   return { modified_files: files, diff: { base, commits: Number(count.stdout.trim()) || 0, buckets: aggregateNumstat(numstat.stdout, new Set(files), o.buckets) } };
