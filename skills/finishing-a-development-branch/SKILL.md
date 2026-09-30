@@ -82,7 +82,9 @@ This is an **enforced disposition gate**, not a surface-only notice. The user is
 
 **Freshness precondition - before any verdict branch, including `CONFORMS`.** The durable block opens with a sentinel: `status: CONFORMS (0 open)` or `status: GAPS (N open)`, then `audited-base: <full HEAD SHA at audit time>`, then an optional `happy-path: <outcome>` line (present exactly when a happy-path run happened; informational, never a freshness input). Read the sentinel, then apply the reference's freshness rule (its `## Closure / conformance` block is the single source): compare `audited-base` to the current working tree; any change, doubt, missing/mismatched sentinel, legacy terse row, or malformed structured reviewer block triggers a fresh audit and replacement of the closure block. Never infer `CONFORMS` from the absence of bullets. Only a clean, valid `status: CONFORMS (0 open)` handoff enters the zero-gap fast path.
 
-**Zero-gap fast path:** print exactly
+**Whole-diff minors (both paths).** Read the block's `whole-diff minors:` section (`conformance-check.md` "Closure / conformance") and render it as one informational, non-blocking line in the `happy-path:` position - directly under the `happy-path:` line when present, otherwise directly under `Closure / conformance: CONFORMS` or the `Conformance: N decisions needed before shipping.` header: `whole-diff minors (3, not blocking): F3, F7, F9`, `whole-diff minors: none`, or `whole-diff minors: not recorded` (section absent). Never a re-audit trigger. The reply point is the Step 4 menu.
+
+**Zero-gap fast path:** print (plus the informational lines below)
 
 ```
 Closure / conformance: CONFORMS
@@ -177,7 +179,9 @@ Which option?
 
 Rows 1-2 run the Option 1/2 blocks; row 3 runs the Keep block and row 4 the Discard block.
 
-**Don't add explanation** - keep options concise.
+**Don't add explanation** - keep options concise. When the minors line lists findings and the block has no `whole-diff minors fix:` line, add only this line under the menu: `Or reply "fix minors" (or "fix minors F3, F9") for one Minor fix round.` This line is the only addition to the exact numbered options.
+
+**Standalone extra reply - `fix minors`.** When the rendered `whole-diff minors` line lists findings, `fix minors` (all) or `fix minors F3, F9` (a subset by `Fn`) is a valid reply beside the numbered options. It dispatches one `implementer` round (`cwd` = the worktree; task = the selected finding lines verbatim; `SCOPED_TEST_COMMANDS` = the plan-header verification set), commits `whole-diff minors fix`, and returns to Step 3.5, where the freshness rule re-audits conformance as for any working-tree change and the regenerated block records the spent round (`whole-diff minors fix: <full SHA>`); Step 4 then re-renders. No code review follows this round: the whole-diff review is an unscoped first review, so its Minors are graded Minors. A block that already carries `whole-diff minors fix:` refuses the reply with "minors round already spent". Any numbered choice ships without them.
 
 ### Step 5: Execute Choice
 

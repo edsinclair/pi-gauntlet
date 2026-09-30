@@ -41,16 +41,18 @@ TRAJECTORY: STAGNANT (repeat of: <finding>)
 
 Pick the first label that applies, in this order:
 
-1. STAGNANT: a previous finding survives materially unchanged - name it.
+1. STAGNANT: a previous Critical or Moderate finding survives materially unchanged - name it.
    (e.g. the same unchecked error path flagged last round is still unchecked)
-2. DIVERGING: <n_now> >= <n_prev>, or the fix introduced any new finding.
+2. DIVERGING: <n_now> >= <n_prev>, or the fix introduced a new Critical or Moderate finding.
    (e.g. 3 findings fixed but the fix broke an import: DIVERGING, not CONVERGING)
-3. CONVERGING: otherwise - the count fell, nothing new appeared, and every
-   surviving finding was materially improved.
+3. CONVERGING: otherwise - the Critical/Moderate count fell, no new Critical or
+   Moderate appeared, and every surviving Critical or Moderate was materially improved.
 
-<n_prev>/<n_now> are finding counts; <X> is the highest remaining severity.
-For this line the severity set is exactly Critical/Moderate/Minor, regardless
-of the vocabulary used elsewhere in your report.
+<n_prev>/<n_now> count Critical and Moderate findings only; Minors - ride-along
+Minors declined or unchanged, and `(outside fix delta)` downgrades alike - never
+move the `TRAJECTORY:` line. <X> is the highest remaining severity. For this line the severity set is
+exactly Critical/Moderate/Minor, regardless of the vocabulary used elsewhere in
+your report.
 
 The orchestrator dispatches one extra fix only when this line says CONVERGING
 without "max severity Critical" - be accurate, not generous.

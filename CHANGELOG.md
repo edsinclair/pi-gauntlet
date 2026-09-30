@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Minor code-review findings ride along in a `FIX_FIRST` fix round and never trigger one; a `SHIP` report ends the loop whatever Minors it lists. The whole-diff review's Minors land in the closure block as `whole-diff minors:` and the finish gate offers a one-shot `fix minors` reply. Re-reviews are scoped to a `## Fix delta` block (the whole-diff review and its re-reviews stay unscoped): a new finding outside it blocks only when Critical; `TRAJECTORY:` counts Critical and Moderate only. Telemetry counts `[Critical]`/`[Moderate]` into `blocker`/`major`. (#56)
+
 ## v6.0.1 - 2026-09-30
 
 ### Changed

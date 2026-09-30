@@ -16,6 +16,12 @@ test("countFindings tallies [blocker]/[major]/[minor] tags; none -> undefined", 
   assert.equal(countFindings("all good"), undefined);
 });
 
+test("countFindings aliases persona tags [Critical]/[Moderate]/[Minor] onto blocker/major/minor", () => {
+  const report = "[Critical] F1: a\n[Moderate] F2: b\n[Moderate] F3: c\n[Minor] F4: d\n[Minor] F5: e\n[Minor] F6: f";
+  assert.deepEqual(countFindings(report), { blocker: 1, major: 2, minor: 3 });
+  assert.deepEqual(countFindings("[Critical] x\n[blocker] y\n[MODERATE] z"), { blocker: 2, major: 1, minor: 0 });
+});
+
 test("countOpenGaps returns the latest conformance result's open gap count", () => {
   assert.equal(countOpenGaps("Conformance verdict: CONFORMS"), 0);
   assert.equal(countOpenGaps("Conformance verdict: GAPS\nG1:\n  verdict: MISSING\nG2:\n  verdict: PARTIAL\nG1:\n  evidence: repeated"), 2);

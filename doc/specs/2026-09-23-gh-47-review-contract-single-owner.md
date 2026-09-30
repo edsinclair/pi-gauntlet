@@ -1,5 +1,7 @@
 # Review contract has one owner per persona
 
+> **Superseded by:** [doc/specs/2026-09-30-gh-56-minor-findings-ride-along-fix-waves.md](./2026-09-30-gh-56-minor-findings-ride-along-fix-waves.md) - `requesting-code-review` "Fix rounds" clause on Minor handling only
+
 **Goal:** Fix GitHub issue #47. The code-review report shape, verdict vocabulary, and `Parallel-safe:` grammar are written in the `code-reviewer` persona and re-written in the request template and SDD prompts; the copies drifted (`Verdict: SHIP | FIX_FIRST | REJECT` vs `Ready to merge? [Yes/No/With fixes]`). Make each persona the sole owner of what its reviewer writes back, make every dispatching file scope payload plus one pointer sentence, and give each duplicated piece of recipient and dispatch guidance one home. Unification: net markdown shrinks.
 
 Supersedes `doc/specs/2026-09-13-gh-30-code-reviewer-verdict-severity.md`, scope: its accepted residual "the template's `Ready to merge` example stays untouched". Its severity-to-verdict policy stands unchanged.

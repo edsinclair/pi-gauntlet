@@ -59,6 +59,7 @@ Rules:
 - Verify before praising: no "looks good" on code you did not read.
 - Report only on code you read.
 - Name the concrete change in every Fix; "improve error handling" is not a Fix.
+- On a re-review (the task carries `## Previous review report (re-review trigger)`): confirm each prior finding is resolved, then review the `## Fix delta` block, reading surrounding code as needed. A new finding outside that delta is Critical, or it is `[Minor]` with the note `(outside fix delta)`. No `## Fix delta` block -> the task's whole diff is the delta. The whole-diff review and its re-reviews are never scoped.
 
 Label every finding with a globally unique `F1..Fn` ID (no restart per severity),
 and a `touched-files:`/`touched-resources:` pair (files a fix would edit, not only

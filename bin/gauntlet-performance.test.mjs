@@ -54,8 +54,8 @@ derived:
     worker: { dispatches: 3, models: [m/beta] }
     spec-council-member: { dispatches: 4, models: [m/alpha] }
   reviews:
-    spec-reviewer: { dispatches: 1, nonzero_exit: 0, findings: { blocker: 1, major: 2, minor: 3 } }
-    code-reviewer: { dispatches: 1, nonzero_exit: 0 }
+    spec-reviewer: { dispatches: 1, nonzero_exit: 0 }
+    code-reviewer: { dispatches: 1, nonzero_exit: 0, findings: { blocker: 1, major: 2, minor: 3 } }
   conformance_loops: 2
   conformance_open_gaps: 0
   gates: { spec_rounds: 1, plan_rounds: 1, fix_round_grants: 1, task_reopens: 0, ship_option: squash }
@@ -211,8 +211,8 @@ test("malformed reviewer entries and findings objects contribute null counters",
     'findings: "bad"',
   );
   const malformedReviewer = COMPLETE.replace(
-    "spec-reviewer: { dispatches: 1, nonzero_exit: 0, findings: { blocker: 1, major: 2, minor: 3 } }",
-    'spec-reviewer: "bad"',
+    "code-reviewer: { dispatches: 1, nonzero_exit: 0, findings: { blocker: 1, major: 2, minor: 3 } }",
+    'code-reviewer: "bad"',
   );
   write(root, `${TDIR}/malformed-findings-object.yaml`, malformedFindings);
   write(root, `${TDIR}/malformed-reviewer.yaml`, malformedReviewer.replace(

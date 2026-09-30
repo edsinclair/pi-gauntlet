@@ -443,6 +443,8 @@ finish gate's revert option needs them all:
 auto-applied fix commits: <Gn: SHA>, <Gm: SHA>, ... (revertable)
 ```
 
+Then the trailing `whole-diff minors:` section - read `whole-diff-minors.md` now (same directory); it is present in every block, a `CONFORMS` handoff too.
+
 ## Concern-scoped fix projection
 
 When the finish gate selects `fix-now` on some concerns of a gap, the fix loop

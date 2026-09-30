@@ -11,12 +11,14 @@ export function usageToTokens(u: unknown): Tokens | undefined {
   return t.input || t.output || t.cache_read || t.cache_write || t.cost ? t : undefined;
 }
 
-const FINDING_TAG_RE = /\[(blocker|major|minor)\]/gi;
+const FINDING_TAG_RE = /\[(critical|blocker|moderate|major|minor)\]/gi;
+// Persona tags alias onto the persisted keys; the schema and gauntlet-performance stay on blocker/major/minor.
+const FINDING_KEY: Record<string, "blocker" | "major" | "minor"> = { critical: "blocker", blocker: "blocker", moderate: "major", major: "major", minor: "minor" };
 export function countFindings(text: string): { blocker: number; major: number; minor: number } | undefined {
   const out = { blocker: 0, major: 0, minor: 0 };
   let any = false;
   for (const m of text.matchAll(FINDING_TAG_RE)) {
-    out[m[1].toLowerCase() as keyof typeof out] += 1;
+    out[FINDING_KEY[m[1].toLowerCase()]] += 1;
     any = true;
   }
   return any ? out : undefined;
