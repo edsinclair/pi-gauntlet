@@ -6,7 +6,7 @@ import { join, relative, sep } from "node:path";
 export const MODEL_LITERAL = /anthropic\/|openai\/|github-copilot\/|google\/|haiku|sonnet|opus|gpt-|xai\/|mistral\/|gemini|grok/i;
 export const SCOPE_DIRS = ["skills", "agents", "extensions"];
 export const SCOPE_FILES = ["README.md", "AGENTS.md", "AGENTS.core.md"];
-export const EXCLUDED_PREFIXES = ["skills/writing-skills/reference/"];
+export const EXCLUDED_PREFIXES = [];
 
 function walk(dir, out) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

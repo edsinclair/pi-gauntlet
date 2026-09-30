@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Breaking:** `skills/forge-skill/` replaces the former skill-authoring skill: one 68-line rules-first `SKILL.md` (pi and Claude Code conventions table, eleven authoring rules, a five-step edit procedure, an optional two-worker A/B test) and no `reference/` files; the three reference documents (Anthropic best-practices copy, persuasion research, subagent testing recipes) are removed. Consumers invoking the old `/skill:` name switch to `/skill:forge-skill`; AGENTS core `v8` routes skill, persona, and prompt edits to it. `forge-skill` is exposed to Claude Code as the sixth marketplace skill (`/gauntlet:forge-skill`). `scripts/model-literal-lint.mjs` drops its only path exclusion (`EXCLUDED_PREFIXES = []`).
+
 ## v5.23.1 - 2026-09-27
 
 ### Changed
@@ -116,7 +122,7 @@
 
 ## v5.16.0 - 2026-09-20
 
-- Skills never name a provider or model: `subagent-driven-development` drops its `## Model Selection` tier table for a one-place `## Model` rule (a dispatch's `model:` is omitted, or carries a `gauntlet_setting` value, a user-named model, or the main loop's own string); `doc/configuration.md` gains `### Dispatch model precedence`; `scripts/model-literal-lint.mjs` bans provider/model literals in `skills/`, `agents/`, `extensions/` from `scripts/ci.mjs`. `writing-skills` widens its trigger to personas and prompt templates and adds `## Authoring rules` (imperative voice, low conditionality, minimal diff, oversized-skill extraction); AGENTS core `v6` makes it binding for every skill, persona, and prompt edit. `shape-ticket` and `conformance-check.md` name the main-loop-string provenance explicitly. (#42)
+- Skills never name a provider or model: `subagent-driven-development` drops its `## Model Selection` tier table for a one-place `## Model` rule (a dispatch's `model:` is omitted, or carries a `gauntlet_setting` value, a user-named model, or the main loop's own string); `doc/configuration.md` gains `### Dispatch model precedence`; `scripts/model-literal-lint.mjs` bans provider/model literals in `skills/`, `agents/`, `extensions/` from `scripts/ci.mjs`. `forge-skill` widens its trigger to personas and prompt templates and adds `## Authoring rules` (imperative voice, low conditionality, minimal diff, oversized-skill extraction); AGENTS core `v6` makes it binding for every skill, persona, and prompt edit. `shape-ticket` and `conformance-check.md` name the main-loop-string provenance explicitly. (#42)
 
 ## v5.15.0 - 2026-09-20
 
@@ -334,7 +340,7 @@
 
 ## v5.0.0 - 2026-08-23
 
-- **Breaking:** `skills/systematic-debugging/` removed (7 files) with active references cleaned (`dispatching-parallel-agents`, `writing-skills`, README); historical `doc/specs/**` and CHANGELOG references retained. Consumers referencing `/skill:systematic-debugging` must migrate to `/skill:chase-bug` for triage.
+- **Breaking:** `skills/systematic-debugging/` removed (7 files) with active references cleaned (`dispatching-parallel-agents`, `forge-skill`, README); historical `doc/specs/**` and CHANGELOG references retained. Consumers referencing `/skill:systematic-debugging` must migrate to `/skill:chase-bug` for triage.
 - New skill `chase-bug` (explicit-invocation-only): human-driven bug triage - origin intake, prior-report search (open + closed, own resolution ladder), three-phase read-only root-cause discovery with a run-falsification evidence bar, an evidenced verdict menu (real bug: file ticket / brainstorm now / respond-only, exactly one `[recommended]`; five negative verdicts with named citation sources), then a gated response-to-origin (exact `send it` confirmation). Baseline-relative zero-mutation invariant (`git status --porcelain --untracked-files=no` at invocation / pre-menu / end); origin text fenced as untrusted data; exactly two human gates. Exposed via the Claude Code marketplace (4-skill allowlist).
 - AGENTS.md gold rule: agent-initiated writes to human-readable channels are gated on exact-text confirmation; obra coverage 12-of-14 -> 11-of-14 (total stays 16).
 
@@ -716,7 +722,7 @@ is deduplicated, and this repo now dogfoods its own workflow (GitHub #1 + folded
 - **Part D - self-hosting mandate.** `AGENTS.md` mandates the full gauntlet for this
   repo's own non-trivial changes and reframes the direct-edit recipes as implement-phase
   mechanics.
-- **Part E - file-placement convention.** `writing-skills` codifies dispatch-payload
+- **Part E - file-placement convention.** `forge-skill` codifies dispatch-payload
   templates as `SKILL.md` siblings vs deep guidance in `reference/` (destination, not format).
 
 ## v4.1.0 - 2026-07-02
@@ -1018,7 +1024,7 @@ Root cause: `plan_tracker` is execution-only by intent, but nothing enforced it.
 - **writing-plans:** drop `plan-document-reviewer-prompt.md` subagent dispatch from the Self-Review step. Align with obra v5.0.6 — inline self-review only. The dispatch added ~25 min/run with no measured quality gain and contradicted the repo's no-belt-and-suspenders rule.
 - **using-git-worktrees:** port obra v5.1.0 Step 0 improvements — robust path resolution via `cd && pwd -P` wrapping, submodule guard via `git rev-parse --show-superproject-working-tree` (replaces fragile `.git is a file` heuristic), branch-state reporting after detection.
 - **using-git-worktrees:** port obra v5.1.0 Step 1a improvements — explicit native-tool name anchors (`EnterWorktree`, `WorktreeCreate`, `/worktree`, `--worktree`). Upstream TDD showed compliance jumped from 2/6 to 50/50 with explicit names.
-- **writing-skills:** fix dead reference to `examples/CLAUDE_MD_TESTING.md` in `reference/testing-skills-with-subagents.md`. File was never ported; replaced with pointer to upstream `obra/superpowers` repo.
+- **forge-skill:** fix dead reference to `examples/CLAUDE_MD_TESTING.md` in `reference/testing-skills-with-subagents.md`. File was never ported; replaced with pointer to upstream `obra/superpowers` repo.
 - **README:** fix broken link — `mariozechner/pi` → `badlogic/pi-mono` (was 404).
 - **AGENTS.md:** improve verification grep example — replace meaningless `specific.company.name` placeholder with realistic patterns (`jjuraszek`, `/Users/[^/]+`, `<your-org-name>`).
 - **extensions:** add `phase-tracker.ts` — tracks workflow phase (brainstorm → plan → implement → verify → ship) with a TUI widget. Session-state only, no disk persistence.
@@ -1029,7 +1035,7 @@ Root cause: `plan_tracker` is execution-only by intent, but nothing enforced it.
 - **Agents:** add `thinking`, `defaultContext`, `inheritSkills` frontmatter to all three personas. Previously these knobs were documented in `AGENTS.md` but missing from the agent files, so dispatch fell back to pi-cohort defaults (typically `thinking: high`, no defaultContext override). Now: reviewers use `thinking: high` + `defaultContext: fresh`; implementer uses `thinking: medium` + `defaultContext: fork`. All three use `inheritSkills: false` to prevent recursive skill discovery in dispatched children.
 - **AGENTS.md:** correct false claim that `plan-tracker.ts` accepts settings — it has no configurable knobs. Tighten the package-conventions section. Document the divergence from `obra/superpowers` v5.1.0 (they dropped `agents/`, we keep them as pi-cohort profiles) and explain why `using-superpowers` is intentionally absent.
 - **README.md:** rewrite for human readability, expand the project-overrides section with a concrete example, fix the version pin from `v0.1.0` to `v0.1.1`.
-- **skills/writing-skills/SKILL.md:** drop project-specific references; broaden the "Where Skills Live in Pi" table to include the package-distributed path; update extension references to reflect package distribution.
+- **skills/forge-skill/SKILL.md:** drop project-specific references; broaden the "Where Skills Live in Pi" table to include the package-distributed path; update extension references to reflect package distribution.
 
 ## v0.1.1 — 2026-05-28
 

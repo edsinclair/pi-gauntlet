@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { EXCLUDED_PREFIXES, MODEL_LITERAL, SCOPE_DIRS, SCOPE_FILES, lintModelLiterals } from "./model-literal-lint.mjs";
 assert.deepEqual(SCOPE_DIRS, ["skills", "agents", "extensions"]);
 assert.deepEqual(SCOPE_FILES, ["README.md", "AGENTS.md", "AGENTS.core.md"]);
-assert.deepEqual(EXCLUDED_PREFIXES, ["skills/writing-skills/reference/"]);
+assert.deepEqual(EXCLUDED_PREFIXES, []);
 assert.equal(MODEL_LITERAL.flags, "i");
 
 // AC1 floor, substring, case-insensitive; additive families
@@ -23,7 +23,6 @@ try {
     writeFileSync(join(tmp, rel), text);
   };
   write("skills/foo/SKILL.md", 'ok line\nmodel: "anthropic/x"\n');
-  write("skills/writing-skills/reference/corpus.md", 'model: "anthropic/x"\n');
   write("extensions/x.mjs", "const m = 'haiku4';\n");
   write("extensions/x.test.ts", 'const model = "p/main";\n');
   write("README.md", "no literal here\n");

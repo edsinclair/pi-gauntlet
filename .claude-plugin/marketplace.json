@@ -1,6 +1,6 @@
 {
   "name": "pi-gauntlet",
-  "description": "Selective Claude Code exposure of pi-gauntlet's tracker-facing skills.",
+  "description": "Selective Claude Code exposure of pi-gauntlet's harness-portable skills.",
   "owner": { "name": "jjuraszek", "url": "https://github.com/jjuraszek" },
   "plugins": [
     {
@@ -8,13 +8,14 @@
       "source": "./",
       "strict": false,
       "agents": [],
-      "description": "Tracker-facing workflow skills from pi-gauntlet: shape-ticket, gatekeep-pr, check-delivery, chase-bug, linear. Harness-portable; the rest of pi-gauntlet is pi-only.",
+      "description": "Harness-portable workflow skills from pi-gauntlet: shape-ticket, gatekeep-pr, check-delivery, chase-bug, linear, forge-skill. The rest of pi-gauntlet is pi-only.",
       "skills": [
         "./skills/shape-ticket",
         "./skills/gatekeep-pr",
         "./skills/check-delivery",
         "./skills/chase-bug",
-        "./skills/linear"
+        "./skills/linear",
+        "./skills/forge-skill"
       ]
     }
   ]
